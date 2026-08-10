@@ -176,7 +176,8 @@ class SimulatorBackend(DeviceBackend):
         if pkg not in rt["apps"]:
             rt["apps"].append(pkg)
         self._act(device, f"安装 {pkg}（来自 {apk_url}）")
-
+    async def install_from_local_file(self, device: Device, local_path: str) -> None:
+        pass  # 模拟器不支持安装本地文件，跳过
     async def screenshot(self, device: Device) -> str:
         rt = self._rt(device)
         if not rt["running"]:

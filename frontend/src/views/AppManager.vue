@@ -105,6 +105,31 @@ function batchInstall() {
   return batchRun('install', '批量安装', { apk_url: batchApk.value }, false)
 }
 
+// 新增：文件上传批量安装
+const batchFile = ref(null)  // 选中的文件
+
+async function batchInstallUpload() {
+  if (!batchFile.value) return ElMessage.warning('请先选择 APK 文件')
+  if (!batchIds.value.length) return ElMessage.warning('请先勾选设备')
+
+  const formData = new FormData()
+  formData.append('device_ids', batchIds.value.join(','))
+  formData.append('file', batchFile.value)
+
+  store.batchProgress = { action: '上传安装', done: 0, total: batchIds.value.length }
+
+  try {
+    const { data } = await http.post('/apps/batch/install-upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    store.batchProgress = { action: '上传安装', done: data.total, total: data.total }
+    lastResult.value = { label: '上传安装', ok: data.ok, failed: data.failed, total: data.total }
+    ElMessage.success(`上传安装完成：成功 ${data.ok}/${data.total}`)
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.detail || '上传安装失败')
+  }
+}
+
 const progressPct = computed(() => {
   const p = store.batchProgress
   return p && p.total ? Math.round((p.done / p.total) * 100) : 0
@@ -240,7 +265,29 @@ onMounted(async () => {
           <el-input v-model="batchApk" placeholder="APK 下载地址（URL）">
             <template #append><el-button @click="batchInstall">批量安装</el-button></template>
           </el-input>
-
+          <!-- 上传安装 -->
+<div style="margin-bottom: 12px;">
+  <el-upload
+    :auto-upload="false"
+    :limit="1"
+    accept=".apk"
+    :on-change="(f) => batchFile = f.raw"
+    :on-remove="() => batchFile = null"
+  >
+    <el-button type="primary" plain>选择 APK 文件</el-button>
+    <template #tip>
+      <div class="el-upload__tip">选择一个本地 APK 文件，然后点下方按钮安装到已选设备</div>
+    </template>
+  </el-upload>
+  <el-button
+    type="primary"
+    :disabled="!batchFile || !batchIds.length"
+    @click="batchInstallUpload"
+    style="margin-top: 8px;"
+  >
+    上传安装到已选设备（{{ batchIds.length }}台）
+  </el-button>
+</div>
           <el-progress
             v-if="store.batchProgress"
             :percentage="progressPct"
