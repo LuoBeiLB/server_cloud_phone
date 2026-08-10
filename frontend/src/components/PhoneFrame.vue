@@ -37,7 +37,7 @@ function onClick(e) {
 </script>
 
 <template>
-  <div class="phone" :style="{ outline: selected ? '3px solid #0a84ff' : 'none' }" @click="onClick">
+  <div class="phone" :style="{ outline: selected ? '3px solid #6366f1' : 'none' }" @click="onClick">
     <img :src="src" :alt="device.name" />
     <el-checkbox
       v-if="selectable"

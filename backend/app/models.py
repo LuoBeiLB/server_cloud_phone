@@ -115,7 +115,7 @@ class ScriptRun(Base):
     __tablename__ = "script_runs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    script_id: Mapped[int] = mapped_column(ForeignKey("scripts.id"))
+    script_id: Mapped[int] = mapped_column(ForeignKey("scripts.id", ondelete="CASCADE"))
     status: Mapped[str] = mapped_column(String(32), default="running")  # running/success/failed
     # 逐设备结果：[{device_id, name, status, steps:[{action, ok, ts}]}]
     results: Mapped[list] = mapped_column(JSON, default=list)

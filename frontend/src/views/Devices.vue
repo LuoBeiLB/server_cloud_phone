@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api/client'
@@ -32,14 +32,39 @@ const form = ref({
   auto_start: true,
 })
 
-const filtered = computed(() =>
-  store.list.filter((d) => {
+// 当前筛选结果：状态 / 分组 + 关键词（设备名/IP/型号/序列号/Android ID/设备号，忽略大小写）。
+// 以前只匹配 d.name，但搜索框提示的是「设备名/IP/型号」，按 IP 或型号搜永远 0 条。
+const filtered = computed(() => {
+  const q = String(filter.value.q || '').trim().toLowerCase()
+  return store.list.filter((d) => {
     if (filter.value.status && d.status !== filter.value.status) return false
     if (filter.value.group_id && d.group_id !== filter.value.group_id) return false
-    if (filter.value.q && !d.name.includes(filter.value.q)) return false
+    if (q) {
+      const haystack = [
+        d.name,
+        d.fingerprint?.device?.model,
+        d.fingerprint?.device?.serialno,
+        d.fingerprint?.device?.android_id,
+        d.fingerprint?.network?.exit_ip,
+        String(d.id),
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      if (!haystack.includes(q)) return false
+    }
     return true
-  }),
-)
+  })
+})
+
+// 分页：每页 8 台，与分页栏展示一致；表格用 paged 渲染，勾选跨页保留（reserve-selection）
+const pageSize = 8
+const page = ref(1)
+const paged = computed(() => {
+  const start = (page.value - 1) * pageSize
+  return filtered.value.slice(start, start + pageSize)
+})
+watch(filter, () => { page.value = 1 }, { deep: true }) // 筛选变化回到第一页
 
 onMounted(async () => {
   store.refresh()
@@ -64,10 +89,22 @@ async function applySkinRow(id, theme) {
   }
 }
 
+function openSkinDlg() {
+  // 勾选了设备就默认应用到「已选设备」；没勾选则回到「全部设备」
+  skinForm.value.scope = selected.value.length ? 'selected' : 'all'
+  skinDlg.value = true
+}
+
 async function applySkinBatch() {
+  const scope = skinForm.value.scope
+  let ids = []
+  if (scope === 'selected') {
+    if (!selected.value.length) return ElMessage.warning('尚未勾选设备，请先在列表中勾选要换肤的设备')
+    ids = selected.value.map((d) => d.id)
+  }
+  // scope === 'all'：ids 保持空数组，后端会应用到全部设备
   skinning.value = true
   try {
-    const ids = skinForm.value.scope === 'filtered' ? filtered.value.map((d) => d.id) : []
     const r = await api.applySkinBatch(ids, skinForm.value.theme)
     ElMessage.success(
       `已为 ${r.data.count} 台设备换肤：${skinLabel(skinForm.value.theme)} · 真机逐台落地中，进度见「皮肤」列`,
@@ -207,94 +244,57 @@ const statusText = { running: '运行中', stopped: '已停止', creating: '创�
 
 <template>
   <div class="page">
-    <div class="toolbar">
-      <el-button type="primary" :icon="'Plus'" @click="createDlg = true">批量建机</el-button>
-      <el-button :icon="'FolderAdd'" @click="newGroup">新建分组</el-button>
-      <el-button :icon="'MagicStick'" @click="skinDlg = true">一键换肤</el-button>
-      <el-button
-        type="danger"
-        plain
-        :icon="'Delete'"
-        :disabled="!selected.length"
-        :loading="deleting"
-        @click="batchRemove"
-      >批量删除{{ selected.length ? ` (${selected.length})` : '' }}</el-button>
-      <el-divider direction="vertical" />
-      <el-input v-model="filter.q" placeholder="搜索名称" style="width: 160px" clearable :prefix-icon="'Search'" />
-      <el-select v-model="filter.status" placeholder="状态" clearable style="width: 120px">
-        <el-option label="运行中" value="running" />
-        <el-option label="已停止" value="stopped" />
-        <el-option label="异常" value="error" />
-      </el-select>
-      <el-select v-model="filter.group_id" placeholder="分组" clearable style="width: 140px">
-        <el-option v-for="g in store.groups" :key="g.id" :label="`${g.name} (${g.device_count})`" :value="g.id" />
-      </el-select>
-      <div class="spacer"></div>
-      <el-button :icon="'Refresh'" @click="store.refresh()">刷新</el-button>
+    <!-- 页面标题 -->
+    <div class="page-header">
+      <div class="page-title">设备管理</div>
+      <div class="page-header-right">
+        <el-button @click="openSkinDlg">一键换肤</el-button>
+        <el-button
+          :disabled="!selected.length"
+          @click="selected.forEach(d => act(api.startDevice, d.id, '已重启'))"
+        >批量重启</el-button>
+        <el-button type="danger" :disabled="!selected.length" :loading="deleting" @click="batchRemove">批量删除</el-button>
+        <el-button type="primary" @click="createDlg = true">+ 添加设备</el-button>
+      </div>
     </div>
 
+    <!-- 筛选栏 -->
+    <div class="filter-bar">
+      <el-input
+        v-model="filter.q"
+        placeholder="搜索设备名/IP/型号"
+        clearable
+        :prefix-icon="'Search'"
+        style="width: 240px"
+      />
+      <el-select v-model="filter.status" placeholder="全部状态" clearable style="width: 140px">
+        <el-option label="在线" value="running" />
+        <el-option label="离线" value="stopped" />
+        <el-option label="告警" value="error" />
+        <el-option label="维护中" value="creating" />
+      </el-select>
+      <el-select v-model="filter.group_id" placeholder="全部分组" clearable style="width: 160px">
+        <el-option v-for="g in store.groups" :key="g.id" :label="`${g.name} (${g.device_count})`" :value="g.id" />
+      </el-select>
+      <el-button size="small" link @click="newGroup">+ 新建分组</el-button>
+      <div class="spacer"></div>
+      <span class="device-count">共 {{ store.list.length }} 台设备</span>
+    </div>
+
+    <!-- 设备表格 -->
     <el-table
-      :data="filtered"
-      border
+      :data="paged"
       stripe
       style="width: 100%"
-      size="small"
       row-key="id"
       @selection-change="onSelectionChange"
     >
       <el-table-column type="selection" width="42" reserve-selection />
-      <el-table-column prop="id" label="ID" width="60" />
-      <el-table-column prop="name" label="名称" width="140" />
-      <el-table-column label="状态" width="112">
-        <template #default="{ row }">
-          <el-tag :type="statusType[row.status]" size="small">{{ statusText[row.status] }}</el-tag>
-          <!-- 拉起/启动失败的原因必须在列表里就能看到。
-               只显示「异常」而把原因藏在后端日志里，等于没有提示。
-               last_error 由后端写入，内容是「原因 ｜ 处置 ｜ 证据」。 -->
-          <el-tooltip v-if="row.last_error" placement="top" :show-after="150">
-            <template #content>
-              <div style="max-width: 460px; line-height: 1.8; white-space: pre-wrap">{{
-                row.last_error
-              }}</div>
-            </template>
-            <el-icon color="#f56c6c" style="margin-left: 5px; vertical-align: -2px; cursor: help">
-              <WarningFilled />
-            </el-icon>
-          </el-tooltip>
-        </template>
+      <el-table-column prop="name" label="设备名" min-width="120" />
+      <el-table-column label="型号" min-width="130">
+        <template #default="{ row }">{{ row.fingerprint?.device?.model || '—' }}</template>
       </el-table-column>
-      <el-table-column label="机型" width="150">
-        <template #default="{ row }">{{ row.fingerprint?.device?.model }}</template>
-      </el-table-column>
-      <el-table-column label="出口 IP" width="130">
-        <template #default="{ row }">{{ row.fingerprint?.network?.exit_ip }}</template>
-      </el-table-column>
-      <el-table-column label="皮肤" width="150">
-        <template #default="{ row }">
-          <template v-if="store.skinProgress[row.id]">
-            <el-tag
-              size="small"
-              :type="{ done: 'success', failed: 'danger' }[store.skinProgress[row.id].phase] || 'warning'"
-            >
-              <el-icon
-                v-if="!['done', 'failed'].includes(store.skinProgress[row.id].phase)"
-                class="is-loading"
-                style="vertical-align: -2px; margin-right: 3px"
-              ><Loading /></el-icon>
-              {{ SKIN_PHASE_TEXT[store.skinProgress[row.id].phase] || store.skinProgress[row.id].phase }}
-            </el-tag>
-          </template>
-          <el-tag v-else-if="row.skin" size="small" effect="plain" type="warning">{{ skinLabel(row.skin) }}</el-tag>
-          <!-- 空 = 还没换过肤，显示原生，别谎报成「iOS 风」 -->
-          <el-tag v-else size="small" effect="plain" type="info">原生安卓</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="当前页面" min-width="180">
-        <template #default="{ row }">
-          <span style="color: #007aff">{{ row.current_url || '主屏（iOS 皮肤）' }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="分组" width="130">
+      <el-table-column label="分组" width="140">
         <template #default="{ row }">
           <el-select
             :model-value="row.group_id"
@@ -307,41 +307,72 @@ const statusText = { running: '运行中', stopped: '已停止', creating: '创�
           </el-select>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="410" fixed="right">
+      <el-table-column label="状态" width="110">
         <template #default="{ row }">
-          <el-button size="small" @click="router.push(`/device/${row.id}`)">操控</el-button>
-          <el-button size="small" @click="router.push(`/detail/${row.id}`)">详情</el-button>
-          <el-button size="small" @click="showFp(row)">指纹</el-button>
-          <el-dropdown size="small" trigger="click" style="margin: 0 8px" @command="(t) => applySkinRow(row.id, t)">
-            <el-button size="small" type="warning" plain>
-              换肤<el-icon style="margin-left: 2px"><ArrowDown /></el-icon>
-            </el-button>
+          <span class="status-cell">
+            <span class="dot" :class="row.status"></span>
+            {{ { running: '在线', stopped: '离线', creating: '维护中', error: '告警' }[row.status] || row.status }}
+          </span>
+          <el-tooltip v-if="row.last_error" placement="top" :show-after="150">
+            <template #content>
+              <div style="max-width: 460px; line-height: 1.8; white-space: pre-wrap">{{ row.last_error }}</div>
+            </template>
+            <el-icon color="#f56c6c" style="margin-left: 4px; vertical-align: -2px; cursor: help">
+              <WarningFilled />
+            </el-icon>
+          </el-tooltip>
+        </template>
+      </el-table-column>
+      <el-table-column label="IP" width="130">
+        <template #default="{ row }">{{ row.fingerprint?.network?.exit_ip || '—' }}</template>
+      </el-table-column>
+      <el-table-column label="皮肤" width="110">
+        <template #default="{ row }">
+          <el-tag v-if="store.skinProgress[row.id]" size="small" :type="store.skinProgress[row.id].phase === 'failed' ? 'danger' : 'warning'" effect="plain">
+            {{ SKIN_PHASE_TEXT[store.skinProgress[row.id].phase] || store.skinProgress[row.id].phase }}
+          </el-tag>
+          <span v-else-if="row.skin">{{ skinLabel(row.skin) }}</span>
+          <span v-else class="muted">—</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="420" fixed="right">
+        <template #default="{ row }">
+          <el-button size="small" type="primary" link @click="router.push(`/device/${row.id}`)">操控</el-button>
+          <el-button size="small" link @click="router.push(`/detail/${row.id}`)">详情</el-button>
+          <el-button size="small" link @click="showFp(row)">指纹</el-button>
+          <el-dropdown size="small" trigger="click" @command="(theme) => applySkinRow(row.id, theme)">
+            <el-button size="small" link style="margin-top: 5px;">换肤<el-icon style="margin-left: 2px"><ArrowDown /></el-icon></el-button>
             <template #dropdown>
               <el-dropdown-menu>
-                <!-- 当前主题不禁用：允许「重新落地」（新建机默认 ios 但真机未落地时用得上） -->
-                <el-dropdown-item
-                  v-for="t in skinThemes"
-                  :key="t.key"
-                  :command="t.key"
-                >{{ t.label }}{{ (row.skin || 'ios') === t.key ? ' ✓' : '' }}</el-dropdown-item>
+                <el-dropdown-item v-for="t in skinThemes" :key="t.key" :command="t.key">{{ t.label }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
           <el-button
-            v-if="row.status !== 'running'"
             size="small"
-            type="success"
-            @click="act(api.startDevice, row.id, '已启动')"
-            >启动</el-button
-          >
-          <el-button v-else size="small" type="warning" @click="act(api.stopDevice, row.id, '已停止')"
-            >停止</el-button
-          >
-          <el-button size="small" @click="rename(row)">改名</el-button>
-          <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
+            link
+            :type="row.status === 'running' ? 'warning' : ''"
+            @click="act(row.status === 'running' ? api.stopDevice : api.startDevice, row.id, row.status === 'running' ? '已停止' : '已启动')"
+          >{{ row.status === 'running' ? '停止' : '启动' }}</el-button>
+          <el-button size="small" link @click="rename(row)">改名</el-button>
+          <el-button size="small" link type="danger" @click="remove(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
+
+    <!-- 分页 -->
+    <div class="pagination-bar">
+      <span class="page-info">
+        显示第 {{ filtered.length ? (page - 1) * pageSize + 1 : 0 }}-{{ Math.min(page * pageSize, filtered.length) }} 条，共 {{ filtered.length }} 条
+      </span>
+      <el-pagination
+        v-model:current-page="page"
+        :total="filtered.length"
+        :page-size="pageSize"
+        layout="prev, pager, next"
+        small
+      />
+    </div>
 
     <!-- 批量建机 -->
     <el-dialog v-model="createDlg" title="批量创建云手机" width="440px">
@@ -384,7 +415,7 @@ const statusText = { running: '运行中', stopped: '已停止', creating: '创�
         <el-form-item label="应用范围">
           <el-radio-group v-model="skinForm.scope">
             <el-radio value="all">全部设备（{{ store.list.length }} 台）</el-radio>
-            <el-radio value="filtered">当前筛选结果（{{ filtered.length }} 台）</el-radio>
+            <el-radio value="selected" :disabled="!selected.length">已选设备（{{ selected.length }} 台）</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-alert
@@ -424,3 +455,39 @@ const statusText = { running: '运行中', stopped: '已停止', creating: '创�
     </el-drawer>
   </div>
 </template>
+
+<style scoped>
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.device-count {
+  color: var(--text-secondary);
+  font-size: 14px;
+  white-space: nowrap;
+}
+.status-cell {
+  display: inline-flex;
+  align-items: center;
+}
+.muted {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 16px;
+}
+.page-info {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+:deep(.el-table) {
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+</style>

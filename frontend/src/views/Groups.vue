@@ -191,100 +191,97 @@ async function moveDevices(gid) {
 
 <template>
   <div class="page">
-    <el-row :gutter="16">
-      <!-- 分组树 -->
-      <el-col :span="9">
-        <el-card shadow="never" class="card">
-          <template #header>
-            <div class="card-hd">
-              <span>分组树（最多 {{ maxDepth }} 级）</span>
-              <div class="spacer"></div>
-              <el-button size="small" type="primary" @click="createGroup(null)">新建顶级分组</el-button>
-              <el-button size="small" @click="loadTree">刷新</el-button>
-            </div>
-          </template>
+    <!-- 页面标题 -->
+    <div class="page-header">
+      <div class="page-title">分组管理</div>
+      <div class="page-header-right">
+        <el-button type="primary" @click="createGroup(null)">+ 新建分组</el-button>
+      </div>
+    </div>
 
-          <div class="hint">
-            <el-tag size="small" type="info" effect="plain">未分组设备 {{ ungrouped }}</el-tag>
-            <span class="tip">支持拖拽调整层级</span>
+    <el-row :gutter="16">
+      <!-- 左栏：分组列表 -->
+      <el-col :span="9">
+        <el-card shadow="never" class="panel-card">
+          <div class="panel-header">
+            <span class="panel-title">分组列表</span>
+            <span class="panel-count">{{ groupOptions.length }}个分组</span>
           </div>
 
           <el-tree
-            v-loading="treeLoading"
             :data="tree"
             :props="treeProps"
             node-key="id"
-            default-expand-all
-            highlight-current
             draggable
             :allow-drop="allowDrop"
-            :expand-on-click-node="false"
-            @node-click="onNodeClick"
             @node-drop="onNodeDrop"
+            @node-click="onNodeClick"
+            v-loading="treeLoading"
+            class="group-tree"
           >
-            <template #default="{ node, data }">
-              <span class="tree-node">
-                <span class="tree-name">
-                  {{ data.name }}
-                  <el-tag size="small" type="info" effect="plain" class="cnt">{{ data.device_count }}</el-tag>
-                  <span v-if="data.total_count > data.device_count" class="total">共 {{ data.total_count }}</span>
+            <template #default="{ data }">
+              <div class="group-list-item" :class="{ active: selectedGroup?.id === data.id }">
+                <span class="group-item-name">{{ data.name }}</span>
+                <span class="group-item-actions">
+                  <span class="group-item-count">{{ data.device_count }}</span>
+                  <el-button size="small" link @click.stop="renameNode(data)">改名</el-button>
+                  <el-button size="small" link type="danger" @click.stop="removeNode(data)">删除</el-button>
                 </span>
-                <span class="tree-ops">
-                  <el-button
-                    v-if="node.level < maxDepth"
-                    link
-                    type="primary"
-                    size="small"
-                    @click.stop="createGroup(data.id, data.name)"
-                    >新建子分组</el-button
-                  >
-                  <el-button link size="small" @click.stop="renameNode(data)">重命名</el-button>
-                  <el-button link type="danger" size="small" @click.stop="removeNode(data)">删除</el-button>
-                </span>
-              </span>
+              </div>
             </template>
           </el-tree>
+          <el-empty v-if="!treeLoading && !tree.length" description="暂无分组" :image-size="60" />
 
-          <el-empty v-if="!treeLoading && !tree.length" description="暂无分组，点击「新建顶级分组」开始" :image-size="80" />
+          <div class="group-list-footer">
+            <span>未分组设备</span>
+            <strong>{{ ungrouped }}</strong>
+          </div>
+          <div class="group-list-footer">
+            <span>设备总数</span>
+            <strong>{{ devices.length }}</strong>
+          </div>
         </el-card>
       </el-col>
 
-      <!-- 设备移动面板 -->
+      <!-- 右栏：移动设备到分组 -->
       <el-col :span="15">
-        <el-card shadow="never" class="card">
-          <template #header>
-            <div class="card-hd">
-              <span>设备移动</span>
-              <div class="spacer"></div>
-              <el-radio-group v-model="deviceFilter" size="small">
-                <el-radio-button label="all">全部</el-radio-button>
-                <el-radio-button label="selected" :disabled="!selectedGroup">
-                  当前分组{{ selectedGroup ? `：${selectedGroup.name}` : '' }}
-                </el-radio-button>
-                <el-radio-button label="ungrouped">未分组</el-radio-button>
-              </el-radio-group>
-              <el-button size="small" @click="loadDevices">刷新</el-button>
-            </div>
-          </template>
+        <el-card shadow="never" class="panel-card">
+          <div class="panel-header">
+            <span class="panel-title">移动设备到分组</span>
+          </div>
 
-          <div class="move-bar">
-            <span class="sel">已选 {{ selectedRows.length }} 台</span>
-            <el-select v-model="targetGroupId" placeholder="目标分组" clearable size="small" style="width: 220px">
-              <el-option
-                v-for="g in groupOptions"
-                :key="g.id"
-                :label="`${g.label}（${g.count}）`"
-                :value="g.id"
-              />
-            </el-select>
-            <el-button
-              type="primary"
-              size="small"
-              :disabled="!selectedRows.length || targetGroupId == null"
-              @click="moveDevices(targetGroupId)"
-              >移动到分组</el-button
-            >
-            <el-button size="small" :disabled="!selectedRows.length" @click="moveDevices(0)">取消分组</el-button>
+          <div class="move-form">
+            <div class="form-row">
+              <label class="form-label">源分组</label>
+              <el-select
+                :model-value="selectedGroup?.id ?? null"
+                placeholder="选择源分组（留空=全部）"
+                clearable
+                style="width: 100%"
+                @change="(id) => {
+                  if (id) {
+                    selectedGroup = { id, name: groupOptions.find(g => g.id === id)?.label?.replace(/　/g, '')?.trim() || '' }
+                    deviceFilter = 'selected'
+                  } else {
+                    selectedGroup = null
+                    deviceFilter = 'all'
+                  }
+                }"
+              >
+                <el-option v-for="g in groupOptions" :key="g.id" :label="g.label.replace(/　/g, '').trim()" :value="g.id" />
+              </el-select>
+            </div>
+            <div class="form-row">
+              <label class="form-label">目标分组</label>
+              <el-select
+                v-model="targetGroupId"
+                placeholder="选择目标分组"
+                clearable
+                style="width: 100%"
+              >
+                <el-option v-for="g in groupOptions" :key="g.id" :label="g.label.replace(/　/g, '').trim()" :value="g.id" />
+              </el-select>
+            </div>
           </div>
 
           <el-table
@@ -293,24 +290,37 @@ async function moveDevices(gid) {
             border
             stripe
             size="small"
-            height="calc(100vh - 260px)"
+            height="calc(100vh - 380px)"
             @selection-change="onSelectionChange"
           >
             <el-table-column type="selection" width="44" />
-            <el-table-column prop="id" label="ID" width="64" />
-            <el-table-column prop="name" label="名称" min-width="140" />
+            <el-table-column prop="name" label="设备名" min-width="120" />
+            <el-table-column label="型号" min-width="120">
+              <template #default="{ row }">{{ row.fingerprint?.device?.model || '—' }}</template>
+            </el-table-column>
             <el-table-column label="状态" width="90">
               <template #default="{ row }">
-                <el-tag :type="statusType[row.status]" size="small">{{ statusText[row.status] }}</el-tag>
+                <span class="dot" :class="row.status"></span>
+                {{ { running: '在线', stopped: '离线', creating: '维护中', error: '告警' }[row.status] || row.status }}
               </template>
             </el-table-column>
-            <el-table-column label="当前分组" min-width="140">
+            <el-table-column label="当前分组" min-width="120">
               <template #default="{ row }">
                 <el-tag v-if="row.group_id != null" size="small" effect="plain">{{ groupName(row.group_id) }}</el-tag>
                 <span v-else class="muted">未分组</span>
               </template>
             </el-table-column>
           </el-table>
+
+          <div class="move-footer">
+            <span class="selected-count">已选择 {{ selectedRows.length }} 台设备</span>
+            <div class="spacer"></div>
+            <el-button
+              type="primary"
+              :disabled="!selectedRows.length || targetGroupId == null"
+              @click="moveDevices(targetGroupId)"
+            >✓ 确认移动</el-button>
+          </div>
         </el-card>
       </el-col>
     </el-row>
@@ -318,68 +328,120 @@ async function moveDevices(gid) {
 </template>
 
 <style scoped>
-.page {
-  padding: 16px;
+.panel-card {
+  border: 1px solid var(--card-border);
 }
-.card {
-  border: 1px solid #ebeef5;
-}
-.card-hd {
+.panel-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.panel-title {
+  font-size: 16px;
   font-weight: 600;
+  color: var(--text-primary);
+}
+.panel-count {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.group-tree {
+  max-height: calc(100vh - 340px);
+  overflow-y: auto;
+}
+:deep(.group-tree .el-tree-node__content) {
+  height: auto;
+  padding: 2px 0;
+}
+.group-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all .15s;
+  margin-bottom: 4px;
+  width: 100%;
+}
+.group-list-item:hover {
+  background: var(--brand-bg);
+}
+.group-list-item.active {
+  background: var(--brand-bg);
+  color: var(--brand-dark);
+  font-weight: 600;
+}
+.group-item-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 14px;
+}
+.group-item-count {
+  background: #f1f5f9;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 10px;
+}
+.group-list-item.active .group-item-count {
+  background: var(--brand);
+  color: #fff;
+}
+.group-list-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0 0;
+  margin-top: 8px;
+  border-top: 1px solid var(--card-border);
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+.group-list-footer strong {
+  color: var(--brand);
+  font-size: 18px;
+}
+.move-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.form-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.move-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--card-border);
+}
+.selected-count {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+.muted {
+  color: var(--text-muted);
 }
 .spacer {
   flex: 1;
 }
-.hint {
+.group-item-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-.tip {
-  color: #909399;
-  font-size: 12px;
-}
-.tree-node {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding-right: 8px;
-}
-.tree-name {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.cnt {
-  transform: scale(0.9);
-}
-.total {
-  color: #909399;
-  font-size: 12px;
-}
-.tree-ops {
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-.tree-node:hover .tree-ops {
-  opacity: 1;
-}
-.move-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-.sel {
-  color: #606266;
-  font-size: 13px;
-}
-.muted {
-  color: #c0c4cc;
+  gap: 4px;
 }
 </style>
