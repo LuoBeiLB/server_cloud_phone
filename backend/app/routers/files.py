@@ -1,0 +1,106 @@
+"""设备文件互传（PC-104 / §7.2.4）：浏览 / 上传 / 下载 / 删除设备文件。
+
+与既有 devices / device_detail / logs 路由共用 /devices 前缀：FastAPI 允许多个路由挂同一
+前缀，只要子路径不同即可。这里使用 /{id}/files 系列子路径，不与其它路由冲突。
+
+文件读写由编排后端提供（redroid 走 adb push/pull/ls/rm，simulator 返回演示数据）：
+  - services.backend.list_files(device, path)           -> list[{"name","is_dir"}]
+  - services.backend.push_file(device, local, remote)   本地文件 -> 设备
+  - services.backend.pull_file(device, remote, local)   设备文件 -> 本地（bool 成功与否）
+  - services.backend.delete_file(device, remote)        删除设备文件
+"""
+from __future__ import annotations
+
+import os
+import tempfile
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.background import BackgroundTask
+
+from ..auth import get_current_user
+from ..database import get_db
+from ..models import Device
+from .. import services
+
+router = APIRouter(prefix="/devices", tags=["files"], dependencies=[Depends(get_current_user)])
+
+# 禁止删除的关键目录：避免误删设备根 / 外置存储根导致数据丢失。
+_PROTECTED = {"", "/", "/sdcard", "/sdcard/"}
+
+
+async def _get_or_404(db: AsyncSession, device_id: int) -> Device:
+    device = await db.get(Device, device_id)
+    if device is None:
+        raise HTTPException(404, "设备不存在")
+    return device
+
+
+@router.get("/{device_id}/files")
+async def list_files(
+    device_id: int,
+    path: str = Query("/sdcard/", description="要浏览的设备目录"),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    device = await _get_or_404(db, device_id)
+    items = await services.backend.list_files(device, path)
+    return {"path": path, "items": items}
+
+
+@router.post("/{device_id}/files/upload")
+async def upload_file(
+    device_id: int,
+    file: UploadFile = File(...),
+    remote_dir: str = Form("/sdcard/"),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    device = await _get_or_404(db, device_id)
+    # 先把上传流落到本地临时文件，再交给编排后端 push 到设备。
+    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        tmp_path = tmp.name
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            tmp.write(chunk)
+    remote_path = remote_dir.rstrip("/") + "/" + file.filename
+    try:
+        await services.backend.push_file(device, tmp_path, remote_path)
+    finally:
+        os.remove(tmp_path)
+    return {"ok": True, "name": file.filename}
+
+
+@router.get("/{device_id}/files/download")
+async def download_file(
+    device_id: int,
+    path: str = Query(..., description="要下载的设备文件绝对路径"),
+    db: AsyncSession = Depends(get_db),
+) -> FileResponse:
+    device = await _get_or_404(db, device_id)
+    # 先 pull 到本地临时文件，再作为附件回传；响应结束后后台清理临时文件。
+    fd, tmp_path = tempfile.mkstemp()
+    os.close(fd)
+    ok = await services.backend.pull_file(device, path, tmp_path)
+    if not ok:
+        os.remove(tmp_path)
+        raise HTTPException(404, "文件下载失败")
+    return FileResponse(
+        tmp_path,
+        filename=os.path.basename(path),
+        background=BackgroundTask(os.remove, tmp_path),
+    )
+
+
+@router.delete("/{device_id}/files")
+async def delete_file(
+    device_id: int,
+    path: str = Query(..., description="要删除的设备文件 / 目录绝对路径"),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    device = await _get_or_404(db, device_id)
+    if path.strip() in _PROTECTED:
+        raise HTTPException(400, "禁止删除该目录")
+    await services.backend.delete_file(device, path)
+    return {"ok": True}

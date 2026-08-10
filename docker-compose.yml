@@ -1,0 +1,138 @@
+# X86 云手机平台 —— Demo 编排（Docker Compose）
+# ---------------------------------------------------------------------------
+# 一条命令拉起整套 demo 底座：postgres + redis + backend(FastAPI) + frontend(Vue/nginx)
+#   docker compose up -d --build
+# 访问：
+#   前端管理系统  http://localhost:5173   （nginx 反代 /api 与 /api/ws 到后端）
+#   后端 API 文档 http://localhost:8000/docs
+#   初始管理员    admin / admin123（由后端首次启动自动播种，见 CLOUD_ADMIN_*）
+#
+# 默认设备后端为 redroid（真机），与生产交付形态一致——不分「演示版/真机版」。
+# 无真机条件时才叠加 docker-compose.simulator.yml 降级（仅功能验证，勿用于演示）。
+# macOS 开发机跑真机：bash deploy/scripts/dev-up-real.sh（Lima Ubuntu VM 内起同一套 compose）。
+# ---------------------------------------------------------------------------
+
+services:
+  # --- PostgreSQL 15：平台主库（设备/分组/脚本/用户）---
+  postgres:
+    image: postgres:15
+    container_name: cloud_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cloud
+      POSTGRES_PASSWORD: cloud
+      POSTGRES_DB: cloud
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"            # 仅调试用；生产可去掉对外暴露
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cloud -d cloud"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # --- Redis 7：会话/广播/批量任务队列位（plan §3 技术栈，预留）---
+  redis:
+    image: redis:7
+    container_name: cloud_redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"            # 仅调试用
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # --- 后端：FastAPI（uvicorn app.main:app，监听 8000，API 前缀 /api，WS 在 /api/ws）---
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cloud_backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # 设备后端：**默认 redroid（真机）**，与生产部署完全一致 ——
+      # 演示给甲方看的就是实际交付形态，不存在「演示版/真机版」两套。
+      #
+      # 宿主必须满足三条内核门槛（部署手册 §2.2 / §2.2b）：
+      #   binder 模块、SELinux（CONFIG_SECURITY_SELINUX）、cgroup 层级。
+      # 不满足时设备会创建失败，管理端「系统自检」与设备列表会直接给出原因与处置。
+      #
+      # 确实无法满足的机器（如 macOS 上的 OrbStack / Docker Desktop，裁剪内核没有
+      # binder/SELinux）才退到模拟设备：
+      #   docker compose -f docker-compose.yml -f docker-compose.simulator.yml up -d
+      # macOS 上要跑真机，用 Lima VM：bash deploy/scripts/dev-up-real.sh
+      CLOUD_DEVICE_BACKEND: redroid
+      # adb 走 docker 网络内的容器名，后端无需 network_mode: host
+      # （host 网络下 nginx 的 proxy_pass backend:8000 会解析不到，整个栈会断）
+      CLOUD_REDROID_ADB_MODE: container
+      # redroid 实例接入的 docker 网络 = <compose 项目名>_default，
+      # 项目名默认取仓库目录名。目录改名或用 -p 时需同步改这里（docker network ls 可确认）
+      CLOUD_REDROID_NETWORK: cloud_default
+      # 数据库：指向本 compose 内的 postgres 服务
+      CLOUD_DATABASE_URL: postgresql+asyncpg://cloud:cloud@postgres:5432/cloud
+      # Redis（当前 demo 后端未强依赖；未识别的 CLOUD_* 会被安全忽略，留作后续扩展）
+      CLOUD_REDIS_URL: redis://redis:6379/0
+      # 鉴权与初始管理员（生产务必修改）
+      CLOUD_JWT_SECRET: change-me-in-production-please
+      CLOUD_ADMIN_USERNAME: admin
+      CLOUD_ADMIN_PASSWORD: admin123
+      # Redroid 参数（仅 CLOUD_DEVICE_BACKEND=redroid 时生效）
+      CLOUD_REDROID_IMAGE: redroid/redroid:12.0.0_64only-latest
+      CLOUD_REDROID_DATA_DIR: /data/redroid
+      CLOUD_REDROID_GPU_MODE: guest
+      # 代理池（一机一码独立出口 IP），JSON 数组，如：
+      # CLOUD_PROXY_POOL: '["socks5://1.2.3.4:1080","http://5.6.7.8:8080"]'
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    volumes:
+      # 后端通过 Docker SDK 起 redroid_<设备ID> 容器，必须能访问宿主 docker daemon
+      - /var/run/docker.sock:/var/run/docker.sock
+      # 实例数据目录，与 CLOUD_REDROID_DATA_DIR 对齐（便于在后端容器内排查实例数据）
+      - /data/redroid:/data/redroid
+    # 说明：这里**刻意不用 network_mode: host**。host 网络下的 backend 不在 compose
+    # 的桥接网上，前端 nginx 的 proxy_pass backend:8000 会解析不到，整个栈会断。
+    # 改由 CLOUD_REDROID_ADB_MODE=container，后端经容器名 adb connect redroid_<id>:5555。
+
+  # --- 前端：Vue3 + Vite 构建产物，由 nginx 托管并反代 /api、/api/ws 到 backend:8000 ---
+  # 构建上下文设为仓库根，以便 Dockerfile 同时 COPY frontend 源码与 deploy/nginx/default.conf。
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: cloud_frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "5173:80"              # 宿主 5173 -> 容器内 nginx 80
+    healthcheck:
+      # 必须写 127.0.0.1 而非 localhost：deploy/nginx/default.conf 的 `listen 80`
+      # 只绑 IPv4，而容器 /etc/hosts 里 localhost 同时解析到 ::1，
+      # BusyBox wget 先试 IPv6 就会 Connection refused，导致容器恒为 unhealthy。
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  postgres_data:
+  redis_data:

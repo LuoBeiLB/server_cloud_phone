@@ -1,0 +1,24 @@
+# 模拟设备（simulator）覆盖层 —— **降级方案，不是演示方案**。
+#
+#     docker compose -f docker-compose.yml -f docker-compose.simulator.yml up -d --build
+#
+# 默认的 `docker compose up -d --build` 起的是**真机**（redroid），与生产部署一致。
+# 只有在宿主内核确实不满足真机门槛时才用这个覆盖层，典型场景：
+#   · macOS 上的 OrbStack / Docker Desktop / Colima —— 裁剪内核没有 binder 与 SELinux
+#   · 内核未编译 binder 的老发行版（如 CentOS 7，内核 3.10）
+#
+# ⚠️ 给甲方演示请勿使用本覆盖层：模拟设备渲染的是 SVG 画面，不是真实 Android，
+#    也不会真的执行 adb 指令。它只用于「无真机环境时验证平台功能与前后端联调」。
+#
+# macOS 上要跑**真机**，不要用这个，用 Lima VM：
+#     bash deploy/scripts/dev-up-real.sh
+# 该脚本会在 Ubuntu VM 里跑与生产完全相同的 compose（实测：Android 12 / SDK 31 /
+# arm64-v8a / 单实例约 1 GiB）。
+
+services:
+  backend:
+    environment:
+      CLOUD_DEVICE_BACKEND: simulator
+    # 模拟后端不操作宿主 Docker，也不需要实例数据目录。
+    # 置空是为了在没有 docker.sock 的机器上也能起来（默认配置里挂了它）。
+    volumes: []

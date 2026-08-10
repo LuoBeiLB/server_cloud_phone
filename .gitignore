@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.db
+.env
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+
+# Electron
+pc-client/out/
+pc-client/dist/
+
+# Android
+app-client/**/build/
+app-client/**/.gradle/
+*.apk
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.log
+.playwright-mcp/

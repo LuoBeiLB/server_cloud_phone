@@ -1,0 +1,44 @@
+:root {
+  --brand: #007aff; /* iOS 蓝 */
+}
+* { box-sizing: border-box; }
+html, body, #app { height: 100%; margin: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Helvetica Neue', Arial, sans-serif;
+  background: #f2f3f5;
+  color: #1d1d1f;
+}
+.page { padding: 16px 20px; }
+.toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+.spacer { flex: 1; }
+
+/* 登录页 */
+.login-wrap {
+  height: 100%; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #5b7cfa 0%, #9b6cf0 50%, #f06cae 100%);
+}
+.login-card { width: 380px; padding: 34px 30px; border-radius: 18px; background: #fff;
+  box-shadow: 0 20px 60px rgba(0,0,0,.25); }
+.login-title { font-size: 22px; font-weight: 700; margin: 0 0 6px; }
+.login-sub { color: #86868b; font-size: 13px; margin-bottom: 22px; }
+
+/* 手机预览卡 */
+.phone { position: relative; border-radius: 26px; overflow: hidden; background: #000;
+  border: 3px solid #111; box-shadow: 0 6px 20px rgba(0,0,0,.18); cursor: pointer; }
+.phone img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.phone .cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 6px 8px;
+  font-size: 12px; color: #fff; background: linear-gradient(transparent, rgba(0,0,0,.6)); }
+.phone .selbox { position: absolute; top: 8px; left: 8px; }
+/* 最近操作：给 tap/swipe/输入文本 这类画面无变化的操作一个可见确认，
+   否则用户点了按钮、后端已成功，但预览纹丝不动，体验上等于「没反应」。 */
+.phone .act { position: absolute; left: 0; right: 0; top: 0; padding: 4px 8px;
+  font-size: 11px; line-height: 1.4; color: #fff; background: rgba(10,132,255,.82);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+.dot.running { background: #34c759; }
+.dot.stopped { background: #8e8e93; }
+.dot.creating { background: #ff9f0a; }
+.dot.error { background: #ff3b30; }
+.grid { display: grid; gap: 14px; }
+.fp-label { color: #86868b; width: 92px; display: inline-block; }
