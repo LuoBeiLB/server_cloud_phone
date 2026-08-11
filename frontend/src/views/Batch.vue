@@ -55,12 +55,15 @@ onBeforeUnmount(() => store.subscribePreviews([], 1))
 
 <template>
   <div class="page">
-    <div class="toolbar">
-      <el-button @click="toggleAll">{{ allSelected ? '取消全选' : '全选' }}</el-button>
-      <el-tag :type="selected.size ? 'success' : 'danger'" effect="dark">
-        已选 {{ selected.size }} / {{ store.list.length }}
-      </el-tag>
-      <div class="spacer"></div>
+    <!-- 页面标题 -->
+    <div class="page-header">
+      <div class="page-title">批量操控</div>
+      <div class="page-header-right">
+        <el-tag :type="selected.size ? 'success' : 'danger'" effect="dark">
+          已选 {{ selected.size }} / {{ store.list.length }}
+        </el-tag>
+        <el-button @click="toggleAll">{{ allSelected ? '取消全选' : '全选' }}</el-button>
+      </div>
     </div>
 
     <!-- 未勾选设备时给出**持久**提示并禁用下面所有下发按钮。
@@ -71,14 +74,14 @@ onBeforeUnmount(() => store.subscribePreviews([], 1))
       type="warning"
       :closable="false"
       show-icon
-      style="margin-bottom: 12px"
+      class="mb"
       title="请先在下方勾选要操作的设备（点卡片左上角复选框，或用「全选」），否则下发按钮不可用"
     />
 
-    <el-card shadow="never" style="margin-bottom: 14px">
+    <el-card shadow="never" class="block">
       <el-row :gutter="12">
         <el-col :span="10">
-          <div style="font-weight: 600; margin-bottom: 8px">① 一键批量开网页（同步）</div>
+          <div class="block-title">① 一键批量开网页（同步）</div>
           <el-input v-model="url" placeholder="https://…">
             <template #append>
               <el-button type="primary" :disabled="!selected.size" @click="run('open_url', { url }, '批量开网页')">下发</el-button>
@@ -86,7 +89,7 @@ onBeforeUnmount(() => store.subscribePreviews([], 1))
           </el-input>
         </el-col>
         <el-col :span="8">
-          <div style="font-weight: 600; margin-bottom: 8px">② 同步操控（1 控 N）</div>
+          <div class="block-title">② 同步操控（1 控 N）</div>
           <el-button-group>
             <el-button :disabled="!selected.size" @click="run('tap', { x: 540, y: 960 }, '同步点击')">同步点击中心</el-button>
             <el-button :disabled="!selected.size" @click="run('swipe', { x1: 540, y1: 1600, x2: 540, y2: 600 }, '同步上滑')">同步上滑</el-button>
@@ -94,7 +97,7 @@ onBeforeUnmount(() => store.subscribePreviews([], 1))
           </el-button-group>
         </el-col>
         <el-col :span="6">
-          <div style="font-weight: 600; margin-bottom: 8px">③ 批量输入 / 装 APK</div>
+          <div class="block-title">③ 批量输入 / 装 APK</div>
           <el-input v-model="textVal" size="small" style="margin-bottom: 6px">
             <template #append><el-button :disabled="!selected.size" @click="run('text', { text: textVal }, '批量输入')">输入</el-button></template>
           </el-input>
@@ -107,14 +110,14 @@ onBeforeUnmount(() => store.subscribePreviews([], 1))
         v-if="store.batchProgress"
         :percentage="progressPct"
         :status="progressPct === 100 ? 'success' : ''"
-        style="margin-top: 14px"
+        class="batch-progress"
       />
-      <div v-if="store.batchProgress" style="font-size: 12px; color: #86868b; margin-top: 4px">
+      <div v-if="store.batchProgress" class="batch-progress-text">
         {{ store.batchProgress.action }}：{{ store.batchProgress.done }} / {{ store.batchProgress.total }}
       </div>
     </el-card>
 
-    <div class="grid" style="grid-template-columns: repeat(6, 1fr)">
+    <div class="device-grid">
       <PhoneFrame
         v-for="d in store.list"
         :key="d.id"
@@ -130,3 +133,31 @@ onBeforeUnmount(() => store.subscribePreviews([], 1))
     <el-empty v-if="!store.list.length" description="暂无设备" />
   </div>
 </template>
+
+<style scoped>
+.block {
+  margin-bottom: 14px;
+}
+.block-title {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+.mb {
+  margin-bottom: 12px;
+}
+.batch-progress {
+  margin-top: 14px;
+}
+.batch-progress-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+.device-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 14px;
+}
+</style>

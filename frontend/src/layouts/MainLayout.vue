@@ -20,20 +20,27 @@ function logout() {
   auth.logout()
   router.push('/login')
 }
+
+const roleLabels = { superadmin: '超级管理员', admin: '管理员', operator: '操作员', viewer: '查看员' }
 </script>
 
 <template>
   <el-container style="height: 100%">
-    <el-aside width="210px" style="background: #1c1c1e; color: #fff">
-      <div style="padding: 20px 18px; font-size: 17px; font-weight: 700">
-        📱 云手机群控平台
+    <el-aside width="220px" class="sidebar">
+      <div class="sidebar-logo">
+        <div class="sidebar-logo-icon">📱</div>
+        <div>
+          <div class="sidebar-logo-title">云手机群控</div>
+          <div class="sidebar-logo-sub">Cloud Console</div>
+        </div>
       </div>
       <el-menu
         :default-active="route.path"
         router
-        background-color="#1c1c1e"
-        text-color="#c7c7cc"
-        active-text-color="#0a84ff"
+        class="sidebar-menu"
+        background-color="transparent"
+        text-color="#94a3b8"
+        active-text-color="#ffffff"
       >
         <el-menu-item index="/dashboard"><el-icon><Odometer /></el-icon>数据看板</el-menu-item>
         <el-menu-item index="/devices"><el-icon><Iphone /></el-icon>设备管理</el-menu-item>
@@ -53,28 +60,16 @@ function logout() {
           <el-menu-item index="/audit"><el-icon><Document /></el-icon>操作审计</el-menu-item>
         </template>
       </el-menu>
+      <div class="sidebar-user">
+        <div class="avatar">{{ (auth.user?.username || 'AD').slice(0, 2).toUpperCase() }}</div>
+        <div class="info">
+          <div class="name">{{ auth.user?.username || 'Admin' }}</div>
+          <div class="role">{{ roleLabels[auth.user?.role] || '管理员' }}</div>
+        </div>
+        <el-icon style="color: #94a3b8; cursor: pointer" @click="logout"><Setting /></el-icon>
+      </div>
     </el-aside>
     <el-container>
-      <el-header
-        style="display: flex; align-items: center; background: #fff; border-bottom: 1px solid #ebeef5"
-      >
-        <span style="font-weight: 600">{{ route.meta.title || '主流程演示' }}</span>
-        <div style="flex: 1"></div>
-        <el-tag type="success" effect="plain" style="margin-right: 12px">
-          在线设备 {{ devices.running.length }} / {{ devices.list.length }}
-        </el-tag>
-        <el-dropdown @command="logout">
-          <span style="cursor: pointer">
-            <el-icon><User /></el-icon> {{ auth.user?.username || 'admin' }}
-          </span>
-          <template #dropdown>
-            <el-dropdown-menu><el-dropdown-item>退出登录</el-dropdown-item></el-dropdown-menu>
-          </template>
-        </el-dropdown>
-      </el-header>
-      <!-- 实时通道断开必须让用户看见。
-           否则 WS 断了只是预览画面静止、状态不更新，用户体验到的是「操作没反应」，
-           而真正的原因只出现在浏览器 console 里。 -->
       <el-alert
         v-if="devices.wsState !== 'open'"
         :type="devices.wsState === 'closed' ? 'error' : 'warning'"
@@ -95,7 +90,6 @@ function logout() {
           <span v-else>实时通道连接中…</span>
         </template>
       </el-alert>
-      <!-- 设备列表加载失败：不要安静地展示旧数据 -->
       <el-alert
         v-if="devices.loadError"
         type="error"
@@ -104,9 +98,58 @@ function logout() {
         style="border-radius: 0"
         :title="`设备列表加载失败：${devices.loadError}`"
       />
-      <el-main style="padding: 0; overflow: auto">
+      <el-main style="padding: 0; overflow: auto; background: #f8fafc">
         <router-view />
       </el-main>
     </el-container>
   </el-container>
 </template>
+
+<style scoped>
+.sidebar {
+  background: linear-gradient(180deg, #0f172a 0%, #1e1b4b 100%);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.sidebar-logo {
+  display: flex; align-items: center; gap: 10px;
+  padding: 18px 20px 14px;
+}
+.sidebar-logo-icon { font-size: 24px; }
+.sidebar-logo-title { font-size: 16px; font-weight: 700; color: #fff; line-height: 1.2; }
+.sidebar-logo-sub { font-size: 11px; color: #64748b; margin-top: 2px; }
+
+.sidebar-menu {
+  flex: 1; overflow-y: auto; border-right: none !important;
+}
+.sidebar-menu .el-menu-item {
+  height: 42px; line-height: 42px; margin: 2px 8px;
+  border-radius: 8px; font-size: 14px;
+}
+.sidebar-menu .el-menu-item:hover {
+  background: rgba(99,102,241,.12) !important;
+}
+.sidebar-menu .el-menu-item.is-active {
+  background: rgba(99,102,241,.25) !important;
+  color: #fff !important; font-weight: 500;
+}
+.sidebar-menu .el-menu-item.is-active .el-icon {
+  color: #818cf8;
+}
+
+.sidebar-user {
+  margin: 8px 12px 12px; padding: 12px;
+  border-radius: 10px; background: rgba(99,102,241,.15);
+  display: flex; align-items: center; gap: 10px;
+  flex-shrink: 0;
+}
+.sidebar-user .avatar {
+  width: 36px; height: 36px; border-radius: 50%;
+  background: #6366f1; display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 700; color: #fff; flex-shrink: 0;
+}
+.sidebar-user .info { flex: 1; min-width: 0; }
+.sidebar-user .name { font-size: 13px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-user .role { font-size: 11px; color: #94a3b8; }
+</style>

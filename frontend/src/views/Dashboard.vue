@@ -100,115 +100,180 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="page dashboard">
-    <div class="toolbar">
-      <span style="font-weight: 600; font-size: 16px">数据看板</span>
-      <el-tag v-if="errored" type="danger" size="small" effect="plain">数据获取失败，正在重试…</el-tag>
-      <el-tag v-else type="info" size="small" effect="plain">每 5 秒自动刷新</el-tag>
-      <div class="spacer"></div>
-      <span class="muted">更新时间：{{ fmtTime(lastUpdated) }}</span>
-      <el-button :icon="'Refresh'" size="small" :loading="loading" @click="load">刷新</el-button>
+    <!-- Page Header -->
+    <div class="page-header">
+      <div class="page-title">数据看板</div>
+      <div class="page-header-right">
+        <el-tag v-if="errored" type="danger" size="small" effect="plain">数据获取失败，正在重试…</el-tag>
+        <span class="update-time">更新于 {{ fmtTime(lastUpdated) }}</span>
+        <el-button type="primary" :icon="'Refresh'" :loading="loading" @click="load">刷新数据</el-button>
+      </div>
     </div>
 
-    <!-- KPI 磁贴 -->
-    <el-row :gutter="14">
-      <el-col v-for="k in kpis" :key="k.key" :xs="12" :sm="8" :md="4">
-        <el-card shadow="hover" class="kpi-card" body-style="padding: 16px">
-          <div class="kpi-icon" :style="{ background: k.color + '1a', color: k.color }">
-            <el-icon :size="20"><component :is="k.icon" /></el-icon>
+    <!-- 4 Stat Cards -->
+    <el-row :gutter="16" class="stat-row">
+      <el-col :xs="12" :sm="6">
+        <div class="stat-card">
+          <div class="stat-icon" style="background: var(--brand-bg); color: var(--brand)">
+            <el-icon :size="22"><Iphone /></el-icon>
           </div>
-          <div class="kpi-meta">
-            <div class="kpi-value">{{ k.value }}</div>
-            <div class="kpi-label">{{ k.label }}</div>
+          <div class="stat-body">
+            <div class="stat-value">{{ overview.total_devices }}</div>
+            <div class="stat-label">设备总数</div>
           </div>
-        </el-card>
+        </div>
+      </el-col>
+      <el-col :xs="12" :sm="6">
+        <div class="stat-card">
+          <div class="stat-icon" style="background: #dcfce7; color: var(--success)">
+            <el-icon :size="22"><VideoPlay /></el-icon>
+          </div>
+          <div class="stat-body">
+            <div class="stat-value">{{ overview.running }}</div>
+            <div class="stat-label">在线</div>
+            <div class="stat-sub" style="color: var(--success)">在线率 {{ overview.total_devices ? ((overview.running / overview.total_devices) * 100).toFixed(0) : 0 }}%</div>
+          </div>
+        </div>
+      </el-col>
+      <el-col :xs="12" :sm="6">
+        <div class="stat-card">
+          <div class="stat-icon" style="background: #fef3c7; color: var(--warning)">
+            <el-icon :size="22"><VideoPause /></el-icon>
+          </div>
+          <div class="stat-body">
+            <div class="stat-value">{{ overview.stopped }}</div>
+            <div class="stat-label">离线</div>
+            <div class="stat-sub">离线设备</div>
+          </div>
+        </div>
+      </el-col>
+      <el-col :xs="12" :sm="6">
+        <div class="stat-card">
+          <div class="stat-icon" style="background: #fee2e2; color: var(--danger)">
+            <el-icon :size="22"><WarningFilled /></el-icon>
+          </div>
+          <div class="stat-body">
+            <div class="stat-value">{{ overview.error }}</div>
+            <div class="stat-label">告警</div>
+            <div class="stat-sub" style="color: var(--danger)">{{ overview.error }}条异常</div>
+          </div>
+        </div>
+      </el-col>
+      <el-col :xs="12" :sm="6">
+        <div class="stat-card">
+          <div class="stat-icon" style="background: var(--brand-bg); color: var(--brand)">
+            <el-icon :size="22"><FolderOpened /></el-icon>
+          </div>
+          <div class="stat-body">
+            <div class="stat-value">{{ overview.total_groups }}</div>
+            <div class="stat-label">分组数</div>
+          </div>
+        </div>
+      </el-col>
+      <el-col :xs="12" :sm="6">
+        <div class="stat-card">
+          <div class="stat-icon" style="background: #fef3c7; color: var(--warning)">
+            <el-icon :size="22"><Connection /></el-icon>
+          </div>
+          <div class="stat-body">
+            <div class="stat-value">{{ overview.ws_clients }}</div>
+            <div class="stat-label">在线WS客户端</div>
+          </div>
+        </div>
       </el-col>
     </el-row>
 
-    <!-- 设备状态分布（分段条） -->
-    <el-card shadow="never" class="block" body-style="padding: 18px 20px">
-      <div class="block-head">
-        <span class="block-title">设备状态分布</span>
-        <span class="muted">共 {{ overview.total_devices }} 台 · 独立出口 IP {{ overview.unique_exit_ips }} 个</span>
-      </div>
-      <div
-        class="stack-bar"
-        role="img"
-        :aria-label="statusSegments.map((s) => `${s.label} ${s.count} 台`).join('，')"
-      >
-        <div
-          v-for="s in statusSegments"
-          v-show="s.pct > 0"
-          :key="s.key"
-          class="stack-seg"
-          :style="{ width: s.pct + '%', background: s.color }"
-          :title="`${s.label} ${s.count} 台（${s.pct.toFixed(1)}%）`"
-        ></div>
-        <div v-if="!overview.total_devices" class="stack-empty">暂无设备</div>
-      </div>
-      <div class="legend">
-        <div v-for="s in statusSegments" :key="s.key" class="legend-item">
-          <span class="legend-dot" :style="{ background: s.color }"></span>
-          <span class="legend-label">{{ s.label }}</span>
-          <span class="legend-count">{{ s.count }}</span>
-        </div>
-      </div>
-    </el-card>
-
-    <!-- 机型分布 + 分组分布 -->
-    <el-row :gutter="14" class="block">
-      <el-col :xs="24" :md="12">
-        <el-card shadow="never" body-style="padding: 18px 20px" class="fill">
+    <!-- 3 Visualization Modules -->
+    <el-row :gutter="16" class="block">
+      <!-- Status Distribution Bar Chart -->
+      <el-col :xs="24" :md="8">
+        <el-card shadow="never" class="chart-card">
           <div class="block-head">
-            <span class="block-title">机型分布</span>
-            <span class="muted">{{ overview.model_distribution.length }} 种机型</span>
+            <span class="block-title">状态分布 <span class="realtime-badge">实时</span></span>
           </div>
-          <div v-if="overview.model_distribution.length" class="hbar-list">
-            <div v-for="m in overview.model_distribution" :key="m.model" class="hbar-row">
+          <div class="bar-chart">
+            <div class="bar-item" v-for="s in statusSegments" :key="s.key">
+              <div class="bar-wrap">
+                <span class="bar-val">{{ s.count }}</span>
+                <div
+                  class="bar-col"
+                  :style="{
+                    height: s.count > 0
+                      ? Math.max(15, Math.round(s.count / Math.max(overview.running || 0, overview.stopped || 0, overview.creating || 0, overview.error || 0, 1) * 100)) + '%'
+                      : '0%',
+                    background: s.color,
+                  }"
+                ></div>
+              </div>
+              <div class="bar-label">{{
+                s.key === 'running' ? '在线' : s.key === 'stopped' ? '离线' : s.key === 'creating' ? '维护' : '告警'
+              }}</div>
+              <div class="bar-pct">{{ s.pct.toFixed(0) }}%</div>
+            </div>
+          </div>
+        </el-card>
+      </el-col>
+
+      <!-- Model Ranking TOP5 -->
+      <el-col :xs="24" :md="8">
+        <el-card shadow="never" class="chart-card">
+          <div class="block-head">
+            <span class="block-title">机型排行TOP5</span>
+          </div>
+          <div class="hbar-list" v-if="overview.model_distribution.length">
+            <div class="hbar-row" v-for="(m, i) in overview.model_distribution.slice(0, 5)" :key="m.model">
+              <span class="rank-badge" :class="'rank-' + (i + 1)">{{ i + 1 }}</span>
               <span class="hbar-label" :title="m.model">{{ m.model }}</span>
               <div class="hbar-track">
-                <div class="hbar-fill model" :style="{ width: (m.count / maxModel) * 100 + '%' }"></div>
+                <div class="hbar-fill" :style="{ width: (m.count / maxModel) * 100 + '%' }"></div>
               </div>
               <span class="hbar-count">{{ m.count }}</span>
             </div>
           </div>
-          <el-empty v-else :image-size="60" description="暂无数据" />
+          <div class="empty-hint" v-else>暂无数据</div>
         </el-card>
       </el-col>
 
-      <el-col :xs="24" :md="12">
-        <el-card shadow="never" body-style="padding: 18px 20px" class="fill">
+      <!-- Group Ranking TOP5 -->
+      <el-col :xs="24" :md="8">
+        <el-card shadow="never" class="chart-card">
           <div class="block-head">
-            <span class="block-title">分组分布</span>
-            <span class="muted">{{ overview.total_groups }} 个分组</span>
+            <span class="block-title">分组排行TOP5</span>
           </div>
-          <div v-if="overview.by_group.length" class="hbar-list">
-            <div v-for="g in overview.by_group" :key="g.group_id ?? 'none'" class="hbar-row">
+          <div class="hbar-list" v-if="overview.by_group.length">
+            <div class="hbar-row" v-for="(g, i) in overview.by_group.slice(0, 5)" :key="g.group_id ?? 'none'">
+              <span class="rank-badge" :class="'rank-' + (i + 1)">{{ i + 1 }}</span>
               <span class="hbar-label" :title="g.name">{{ g.name }}</span>
               <div class="hbar-track">
-                <div class="hbar-fill group" :style="{ width: (g.count / maxGroup) * 100 + '%' }"></div>
+                <div class="hbar-fill" :style="{ width: (g.count / maxGroup) * 100 + '%' }"></div>
               </div>
               <span class="hbar-count">{{ g.count }}</span>
             </div>
           </div>
-          <el-empty v-else :image-size="60" description="暂无分组" />
+          <div class="empty-hint" v-else>暂无数据</div>
         </el-card>
       </el-col>
     </el-row>
 
-    <!-- 最近创建的设备 -->
-    <el-card shadow="never" class="block" body-style="padding: 18px 20px">
+    <!-- Recent Active Devices Table -->
+    <el-card shadow="never" class="block">
       <div class="block-head">
-        <span class="block-title">最近创建的设备</span>
+        <span class="block-title">最近活跃设备</span>
       </div>
       <el-table :data="overview.recent_devices" size="small" style="width: 100%">
-        <el-table-column prop="id" label="ID" width="70" />
-        <el-table-column prop="name" label="名称" min-width="140" />
+        <el-table-column prop="name" label="设备名称" min-width="140" />
+        <el-table-column label="型号" min-width="120">
+          <template #default="{ row }">{{ row.model || '—' }}</template>
+        </el-table-column>
+        <el-table-column label="分组" min-width="120">
+          <template #default="{ row }">{{ row.group_name || '—' }}</template>
+        </el-table-column>
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
             <el-tag :type="statusTagType[row.status]" size="small">{{ statusText[row.status] }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="创建时间" min-width="180">
+        <el-table-column label="最近活跃" min-width="180">
           <template #default="{ row }">{{ fmtDateTime(row.created_at) }}</template>
         </el-table-column>
         <template #empty>暂无设备</template>
@@ -218,158 +283,165 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.dashboard .muted {
-  color: #86868b;
+.dashboard .update-time {
+  color: var(--text-muted);
   font-size: 12px;
 }
 
-/* KPI 磁贴 */
-.kpi-card {
-  margin-bottom: 14px;
-  border-radius: 12px;
+/* Stat cards row */
+.stat-row {
+  margin-bottom: 16px;
 }
-.kpi-card :deep(.el-card__body) {
+.stat-card {
+  background: #fff;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  padding: 20px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
+  transition: box-shadow 0.2s;
+  height: 100%;
 }
-.kpi-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
+.stat-card:hover {
+  box-shadow: var(--shadow-lg);
+}
+.stat-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
-.kpi-value {
-  font-size: 24px;
+.stat-body {
+  min-width: 0;
+}
+.stat-value {
+  font-size: 28px;
   font-weight: 700;
   line-height: 1.1;
-  color: #1d1d1f;
+  color: var(--text-primary);
 }
-.kpi-label {
+.stat-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+.stat-sub {
   font-size: 12px;
-  color: #86868b;
+  color: var(--text-muted);
   margin-top: 2px;
 }
 
-/* 区块 */
+/* Chart cards */
 .block {
-  margin-top: 4px;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
+}
+.chart-card {
+  border-radius: var(--radius);
+  height: 100%;
 }
 .block-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 .block-title {
   font-weight: 600;
   font-size: 15px;
-  color: #1d1d1f;
-}
-.fill {
-  height: 100%;
-  border-radius: 12px;
-}
-.el-card.block,
-.el-card.fill {
-  border-radius: 12px;
-}
-
-/* 状态分段条 */
-.stack-bar {
-  display: flex;
-  height: 22px;
-  width: 100%;
-  border-radius: 6px;
-  overflow: hidden;
-  background: #ebedf0;
-}
-.stack-seg {
-  height: 100%;
-  transition: width 0.4s ease;
-}
-.stack-empty {
-  width: 100%;
-  text-align: center;
-  font-size: 12px;
-  color: #86868b;
-  line-height: 22px;
-}
-.legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 18px;
-  margin-top: 14px;
-}
-.legend-item {
+  color: var(--text-primary);
   display: flex;
   align-items: center;
-  font-size: 13px;
+  gap: 6px;
 }
-.legend-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-  margin-right: 6px;
-}
-.legend-label {
-  color: #1d1d1f;
-  margin-right: 6px;
-}
-.legend-count {
-  font-weight: 600;
-  color: #1d1d1f;
+.realtime-badge {
+  font-size: 11px;
+  color: var(--success);
+  background: #dcfce7;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 500;
 }
 
-/* 横向条形列表 */
-.hbar-list {
+/* Bar chart */
+.bar-chart {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-around;
+  height: 180px;
+  padding: 10px 8px 0;
+}
+.bar-item {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-}
-.hbar-row {
-  display: flex;
   align-items: center;
-  gap: 10px;
-}
-.hbar-label {
-  width: 120px;
-  flex-shrink: 0;
-  font-size: 13px;
-  color: #1d1d1f;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.hbar-track {
   flex: 1;
-  height: 14px;
-  background: #f0f1f3;
-  border-radius: 7px;
-  overflow: hidden;
-}
-.hbar-fill {
   height: 100%;
-  border-radius: 7px;
-  min-width: 2px;
-  transition: width 0.4s ease;
 }
-.hbar-fill.model {
-  background: linear-gradient(90deg, #0a84ff, #5ac8fa);
+.bar-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  width: 100%;
 }
-.hbar-fill.group {
-  background: linear-gradient(90deg, #5856d6, #af52de);
-}
-.hbar-count {
-  width: 40px;
-  flex-shrink: 0;
-  text-align: right;
+.bar-val {
   font-size: 13px;
   font-weight: 600;
-  color: #1d1d1f;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+.bar-col {
+  width: 36px;
+  max-width: 50px;
+  border-radius: 6px 6px 0 0;
+  min-height: 4px;
+  transition: height 0.4s ease;
+}
+.bar-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 8px;
+}
+.bar-pct {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* Rank badges */
+.rank-badge {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+  color: #fff;
+  background: var(--text-muted);
+}
+.rank-badge.rank-1 {
+  background: var(--brand);
+}
+.rank-badge.rank-2 {
+  background: #818cf8;
+}
+.rank-badge.rank-3 {
+  background: #a5b4fc;
+}
+
+/* Empty hint */
+.empty-hint {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 40px 0;
 }
 </style>

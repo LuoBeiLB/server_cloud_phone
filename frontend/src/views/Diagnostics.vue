@@ -66,22 +66,27 @@ onMounted(load)
 
 <template>
   <div class="page">
-    <div class="bar">
-      <el-button type="primary" :loading="loading" :icon="'Refresh'" @click="load">
-        重新自检
-      </el-button>
-      <template v-if="data">
-        <el-tag :type="STATUS_META[data.overall]?.type" size="large" effect="dark">
-          总体：{{ STATUS_META[data.overall]?.label || data.overall }}
-        </el-tag>
-        <span class="muted">
-          设备后端 <b>{{ data.backend }}</b> · 探测位置 <b>{{ data.probed_from }}</b>
-        </span>
-        <span class="muted">
-          正常 {{ data.summary.ok }} · 注意 {{ data.summary.warn }} · 故障
-          {{ data.summary.fail }} · 无法判定 {{ data.summary.unknown }}
-        </span>
-      </template>
+    <!-- 页面标题 -->
+    <div class="page-header">
+      <div class="page-title">系统自检</div>
+      <div class="page-header-right">
+        <el-button type="primary" :loading="loading" :icon="'Refresh'" @click="load">
+          重新自检
+        </el-button>
+      </div>
+    </div>
+
+    <div class="bar" v-if="data">
+      <el-tag :type="STATUS_META[data.overall]?.type" size="large" effect="dark">
+        总体：{{ STATUS_META[data.overall]?.label || data.overall }}
+      </el-tag>
+      <span class="muted">
+        设备后端 <b>{{ data.backend }}</b> · 探测位置 <b>{{ data.probed_from }}</b>
+      </span>
+      <span class="muted">
+        正常 {{ data.summary.ok }} · 注意 {{ data.summary.warn }} · 故障
+        {{ data.summary.fail }} · 无法判定 {{ data.summary.unknown }}
+      </span>
     </div>
 
     <el-alert v-if="error" type="error" :closable="false" show-icon class="mb">
@@ -137,7 +142,7 @@ onMounted(load)
 
 <style scoped>
 .page {
-  padding: 16px;
+  padding: 20px 24px;
 }
 .bar {
   display: flex;
@@ -147,7 +152,7 @@ onMounted(load)
   margin-bottom: 14px;
 }
 .muted {
-  color: #909399;
+  color: var(--text-muted);
   font-size: 13px;
 }
 .mb {
@@ -171,13 +176,13 @@ onMounted(load)
   flex-wrap: wrap;
 }
 .value {
-  color: #606266;
+  color: var(--text-secondary);
   font-size: 13px;
 }
 .reason {
   margin-top: 8px;
   font-size: 13px;
-  color: #c45656;
+  color: var(--danger);
   line-height: 1.7;
   word-break: break-all;
 }
@@ -186,7 +191,7 @@ onMounted(load)
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  background: #f4f4f5;
+  background: #f1f5f9;
   border-radius: 4px;
   padding: 8px 10px;
 }
@@ -194,11 +199,11 @@ onMounted(load)
   flex: 1;
   font-size: 13px;
   line-height: 1.7;
-  color: #303133;
+  color: var(--text-primary);
   word-break: break-all;
 }
 code {
-  background: #f4f4f5;
+  background: #f1f5f9;
   padding: 1px 5px;
   border-radius: 3px;
 }

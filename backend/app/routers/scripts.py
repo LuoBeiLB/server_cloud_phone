@@ -18,6 +18,7 @@ import copy
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -164,6 +165,9 @@ async def delete_script(script_id: int, db: AsyncSession = Depends(get_db)) -> d
     script = await db.get(Script, script_id)
     if script is None:
         raise HTTPException(404, "脚本不存在")
+    # 先删关联的运行记录：script_runs.script_id 外键指向 scripts.id，
+    # 脚本有回放历史时直接删除会触发外键约束（IntegrityError → 500）。
+    await db.execute(sa_delete(ScriptRun).where(ScriptRun.script_id == script_id))
     await db.delete(script)
     await db.commit()
     return {"ok": True}

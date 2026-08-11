@@ -282,16 +282,21 @@ function stepSummary(step) {
       style="margin-bottom: 10px"
       :title="`脚本列表加载失败：${loadError}`"
     />
-    <div class="toolbar">
-      <span style="font-weight: 600">脚本引擎 · 可视化编辑 → 跨设备回放</span>
-      <div class="spacer"></div>
-      <el-button type="primary" :icon="'Plus'" @click="newScript">新建脚本</el-button>
-      <el-button :icon="'Collection'" @click="openTemplates">模板库</el-button>
-      <el-button :icon="'Upload'" @click="openImport">导入</el-button>
-      <el-button @click="seedDemo">生成示例脚本</el-button>
+    <!-- 页面标题 -->
+    <div class="page-header">
+      <div class="page-title">
+        脚本回放
+        <span class="ver">可视化编辑 → 跨设备回放</span>
+      </div>
+      <div class="page-header-right">
+        <el-button @click="seedDemo">生成示例脚本</el-button>
+        <el-button :icon="'Upload'" @click="openImport">导入</el-button>
+        <el-button :icon="'Collection'" @click="openTemplates">模板库</el-button>
+        <el-button type="primary" :icon="'Plus'" @click="newScript">新建脚本</el-button>
+      </div>
     </div>
 
-    <el-table :data="scripts" border>
+    <el-table :data="scripts" border stripe>
       <el-table-column prop="id" label="ID" width="60" />
       <el-table-column prop="name" label="脚本名称" min-width="160" />
       <el-table-column label="步骤数" width="90">
@@ -378,7 +383,7 @@ function stepSummary(step) {
         <!-- 循环体（逻辑控制）：嵌套子步骤 -->
         <div v-if="step.action === 'loop'" class="loop-body">
           <div class="steps-head sub">
-            <span style="color: #b88230">循环体 · 重复 {{ step.params.count }} 次（{{ (step.params.steps || []).length }} 子步）</span>
+            <span style="color: var(--warning)">循环体 · 重复 {{ step.params.count }} 次（{{ (step.params.steps || []).length }} 子步）</span>
             <el-button size="small" plain :icon="'Plus'" @click="addStep(step.params.steps)">添加子步骤</el-button>
           </div>
           <div v-for="(sub, j) in step.params.steps" :key="j" class="step-row sub">
@@ -436,7 +441,7 @@ function stepSummary(step) {
         <el-table-column label="模板" min-width="180">
           <template #default="{ row }">
             <div style="font-weight: 600">{{ row.name }}</div>
-            <div style="color: #86868b; font-size: 12px">{{ row.description }}</div>
+            <div style="color: var(--text-muted); font-size: 12px">{{ row.description }}</div>
           </template>
         </el-table-column>
         <el-table-column label="步骤" width="80" align="center">
@@ -458,7 +463,7 @@ function stepSummary(step) {
       <div style="margin-bottom: 8px">
         <el-button :icon="'Document'" @click="pickFile">选择 JSON 文件</el-button>
         <input ref="fileInput" type="file" accept=".json,application/json" style="display: none" @change="onFile" />
-        <span style="color: #86868b; font-size: 12px; margin-left: 8px">或直接粘贴 {name, description, steps}</span>
+        <span style="color: var(--text-muted); font-size: 12px; margin-left: 8px">或直接粘贴 {name, description, steps}</span>
       </div>
       <el-input v-model="importText" type="textarea" :rows="10" placeholder='{"name":"…","description":"…","steps":[{"action":"open_url","params":{"url":"https://…"}}]}' />
       <template #footer>
@@ -517,11 +522,11 @@ function stepSummary(step) {
   margin: 6px 0;
 }
 .step-card {
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm);
   padding: 8px 10px;
   margin-bottom: 8px;
-  background: var(--el-fill-color-blank);
+  background: #fff;
 }
 .step-row {
   display: flex;
@@ -540,18 +545,22 @@ function stepSummary(step) {
   height: 22px;
   padding: 0 6px;
   border-radius: 6px;
-  background: var(--el-fill-color);
-  color: #86868b;
+  background: #f1f5f9;
+  color: var(--text-muted);
   font-size: 12px;
 }
 .loop-body {
   margin-top: 8px;
   padding: 6px 10px 4px;
-  border-left: 3px solid #f2c26b;
-  background: var(--el-fill-color-light);
+  border-left: 3px solid var(--warning);
+  background: #fffbeb;
   border-radius: 6px;
 }
 .spacer {
   flex: 1;
+}
+:deep(.el-table) {
+  border-radius: var(--radius-sm);
+  overflow: hidden;
 }
 </style>

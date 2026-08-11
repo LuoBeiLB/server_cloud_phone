@@ -90,10 +90,15 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="page logs">
-    <div class="toolbar">
-      <span style="font-weight: 600; font-size: 16px">设备日志</span>
-      <div class="spacer" style="flex: 1"></div>
+    <!-- 页面标题 -->
+    <div class="page-header">
+      <div class="page-title">设备日志</div>
+      <div class="page-header-right">
+        <el-button :icon="'Refresh'" :loading="loading" @click="loadLogs">刷新</el-button>
+      </div>
+    </div>
 
+    <div class="toolbar">
       <span class="muted">设备</span>
       <el-select v-model="deviceId" placeholder="选择设备" size="small" style="width: 200px" filterable>
         <el-option v-for="d in devices" :key="d.id" :label="`${d.name} (#${d.id})`" :value="d.id">
@@ -110,7 +115,6 @@ onBeforeUnmount(() => {
       </el-select>
 
       <el-switch v-model="autoRefresh" size="small" active-text="自动刷新" inline-prompt />
-      <el-button :icon="'Refresh'" size="small" :loading="loading" @click="loadLogs">刷新</el-button>
     </div>
 
     <el-card shadow="never" body-style="padding: 0" class="log-card">
@@ -132,25 +136,18 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .logs {
-  padding: 16px;
+  padding: 20px 24px;
   display: flex;
   flex-direction: column;
   height: 100%;
   box-sizing: border-box;
 }
-.logs .toolbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 14px;
-  flex-wrap: wrap;
-}
 .logs .muted {
-  color: #86868b;
+  color: var(--text-muted);
   font-size: 12px;
 }
 .log-card {
-  border-radius: 12px;
+  border-radius: var(--radius);
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -167,15 +164,15 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  border-bottom: 1px solid #ebeef5;
+  border-bottom: 1px solid var(--card-border);
 }
 .log-box {
   flex: 1;
   margin: 0;
   padding: 14px 16px;
   overflow: auto;
-  background: #1c1c1e;
-  color: #d1d1d6;
+  background: var(--sidebar-bg);
+  color: #cbd5e1;
   font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
   font-size: 12px;
   line-height: 1.6;
@@ -187,6 +184,6 @@ onBeforeUnmount(() => {
   display: block;
 }
 .log-empty {
-  color: #86868b;
+  color: var(--text-muted);
 }
 </style>

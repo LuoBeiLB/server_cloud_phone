@@ -20,6 +20,21 @@ const ACTION_LABELS = {
 }
 const actionLabel = (a) => ACTION_LABELS[a] || a
 
+// ---------- 状态标签 ----------
+const TASK_STATUS = {
+  running: { label: '运行中', type: 'success' },
+  pending: { label: '待执行', type: 'primary' },
+  paused: { label: '已暂停', type: 'warning' },
+  failed: { label: '失败', type: 'danger' },
+}
+
+function taskStatus(row) {
+  if (!row.enabled) return TASK_STATUS.paused
+  if (row.last_result?.failed) return TASK_STATUS.failed
+  if (row.last_result) return TASK_STATUS.running
+  return TASK_STATUS.pending
+}
+
 const form = reactive({
   name: '',
   action: 'open_url',
@@ -165,57 +180,62 @@ onBeforeUnmount(() => timer && clearInterval(timer))
 
 <template>
   <div class="page">
-    <div class="toolbar">
-      <span style="font-weight: 600">任务调度 · 定时 / 循环批量指令下发</span>
-      <div class="spacer"></div>
-      <el-button type="primary" @click="openCreate">创建任务</el-button>
+    <div class="page-header">
+      <div class="page-title">任务调度</div>
+      <div class="page-header-right">
+        <el-button type="primary" :icon="'Plus'" @click="openCreate">新建任务</el-button>
+      </div>
     </div>
 
-    <el-table :data="tasks" border>
-      <el-table-column prop="id" label="ID" width="60" />
-      <el-table-column prop="name" label="任务名称" min-width="140" />
-      <el-table-column label="动作" width="110">
+    <el-table v-if="tasks.length" :data="tasks" border stripe>
+      <el-table-column prop="name" label="任务名称" min-width="160" />
+      <el-table-column label="类型" width="140">
         <template #default="{ row }">
-          <el-tag size="small">{{ actionLabel(row.action) }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="目标设备" width="100">
-        <template #default="{ row }">{{ row.device_ids.length }} 台</template>
-      </el-table-column>
-      <el-table-column label="类型" width="130">
-        <template #default="{ row }">
-          <el-tag :type="row.schedule_type === 'interval' ? 'warning' : 'info'" size="small">
+          <el-tag :type="row.schedule_type === 'interval' ? 'warning' : 'info'" size="small" effect="light">
             {{ row.schedule_type === 'interval' ? `循环 · ${row.interval_seconds}s` : '定时（单次）' }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="启用" width="80">
-        <template #default="{ row }">
-          <el-switch v-model="row.enabled" @change="toggle(row)" />
-        </template>
+      <el-table-column label="动作" width="100" align="center">
+        <template #default="{ row }">{{ actionLabel(row.action) }}</template>
       </el-table-column>
-      <el-table-column label="下次运行" min-width="170">
+      <el-table-column label="执行对象" width="110" align="center">
+        <template #default="{ row }">{{ row.device_ids.length }} 台设备</template>
+      </el-table-column>
+      <el-table-column label="下次执行" min-width="170">
         <template #default="{ row }">{{ row.enabled ? fmt(row.next_run) : '—' }}</template>
       </el-table-column>
-      <el-table-column label="上次结果" min-width="150">
+      <el-table-column label="状态" width="110" align="center">
         <template #default="{ row }">
-          <span v-if="!row.last_result" style="color: #86868b">未运行</span>
-          <el-tag v-else :type="row.last_result.failed ? 'danger' : 'success'" size="small">
-            成功 {{ row.last_result.ok }}/{{ row.last_result.total }}
+          <el-tag :type="taskStatus(row).type" size="small" effect="light">
+            {{ taskStatus(row).label }}
           </el-tag>
-          <span v-if="row.last_run" style="color: #86868b; font-size: 12px; margin-left: 6px">
-            {{ fmt(row.last_run) }}
-          </span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="190" fixed="right">
+      <el-table-column label="启用" width="80" align="center">
         <template #default="{ row }">
-          <el-button size="small" type="primary" @click="runNow(row)">立即执行</el-button>
-          <el-button size="small" type="danger" @click="del(row)">删除</el-button>
+          <el-switch v-model="row.enabled" @change="toggle(row)" size="small" />
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="220" fixed="right">
+        <template #default="{ row }">
+          <el-button size="small" text :icon="'Edit'" @click="openCreate">编辑</el-button>
+          <el-button size="small" text type="primary" :icon="'VideoPlay'" @click="runNow(row)">执行</el-button>
+          <el-button size="small" text type="danger" :icon="'Delete'" @click="del(row)"></el-button>
         </template>
       </el-table-column>
     </el-table>
-    <el-empty v-if="!tasks.length" description="暂无调度任务，点右上「创建任务」" />
+
+    <div v-if="!tasks.length" class="empty-card">
+      <div class="empty-icon">
+        <el-icon :size="48"><Clock /></el-icon>
+      </div>
+      <div class="empty-title">暂无待执行任务</div>
+      <div class="empty-desc">创建定时或循环任务，让云端设备按计划自动执行脚本。</div>
+      <div style="display: flex; gap: 12px; justify-content: center;">
+        <el-button type="primary" :icon="'Plus'" @click="openCreate">创建第一个任务</el-button>
+      </div>
+    </div>
 
     <el-dialog v-model="dlg" title="创建调度任务" width="620px">
       <el-form label-width="96px">
@@ -290,3 +310,9 @@ onBeforeUnmount(() => timer && clearInterval(timer))
     </el-dialog>
   </div>
 </template>
+
+<style scoped>
+.page {
+  padding: 20px 24px;
+}
+</style>

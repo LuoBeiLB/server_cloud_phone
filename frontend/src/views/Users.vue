@@ -13,8 +13,9 @@ const roleLabels = {
   operator: '操作员',
   viewer: '查看员',
 }
-const roleTag = { superadmin: 'danger', admin: 'warning', operator: 'success', viewer: 'info' }
+const roleTag = { superadmin: 'danger', admin: 'warning', operator: 'primary', viewer: 'info' }
 const roleOptions = [
+  { value: '', label: '全部角色' },
   { value: 'viewer', label: '查看员' },
   { value: 'operator', label: '操作员' },
   { value: 'admin', label: '管理员' },
@@ -25,6 +26,33 @@ const canManage = computed(() => (ROLE_LEVELS[auth.user?.role] || 0) >= ROLE_LEV
 
 const users = ref([])
 const loading = ref(false)
+
+// 搜索 & 筛选
+const searchQuery = ref('')
+const roleFilter = ref('')
+
+// 分页
+const currentPage = ref(1)
+const pageSize = ref(10)
+
+const filteredUsers = computed(() => {
+  let result = users.value
+  if (searchQuery.value) {
+    const q = searchQuery.value.toLowerCase()
+    result = result.filter(
+      (u) => u.username?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q),
+    )
+  }
+  if (roleFilter.value) {
+    result = result.filter((u) => u.role === roleFilter.value)
+  }
+  return result
+})
+
+const pagedUsers = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return filteredUsers.value.slice(start, start + pageSize.value)
+})
 
 const createDlg = ref(false)
 const saving = ref(false)
@@ -106,6 +134,16 @@ async function resetPwd(u) {
   }
 }
 
+async function toggleUser(u) {
+  try {
+    await http.patch(`/users/${u.id}`, { enabled: !u.enabled })
+    ElMessage.success(u.enabled ? '已禁用' : '已启用')
+    await load()
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.detail || '操作失败')
+  }
+}
+
 async function removeUser(u) {
   try {
     await ElMessageBox.confirm(`确认删除用户「${u.username}」？`, '确认', { type: 'warning' })
@@ -125,6 +163,10 @@ function fmt(ts) {
   if (!ts) return '—'
   return new Date(ts).toLocaleString('zh-CN')
 }
+
+function isDisabled(u) {
+  return u.enabled === false
+}
 </script>
 
 <template>
@@ -138,31 +180,61 @@ function fmt(ts) {
       description="当前账号无权访问用户管理，请联系管理员分配「管理员」及以上角色。"
     />
     <template v-else>
-      <div class="toolbar">
-        <el-button type="primary" @click="openCreate">新建用户</el-button>
-        <div class="spacer"></div>
-        <el-button @click="load">刷新</el-button>
+      <div class="page-header">
+        <div class="page-title">用户管理</div>
+        <div class="page-header-right">
+          <el-button type="primary" :icon="'Plus'" @click="openCreate">新建用户</el-button>
+        </div>
       </div>
 
-      <el-table :data="users" v-loading="loading" border stripe style="width: 100%" size="small">
-        <el-table-column prop="id" label="ID" width="70" />
-        <el-table-column prop="username" label="用户名" min-width="160" />
-        <el-table-column label="角色" width="140">
+      <div class="toolbar">
+        <el-input
+          v-model="searchQuery"
+          placeholder="搜索用户名"
+          :prefix-icon="'Search'"
+          style="width: 260px"
+          clearable
+        />
+        <el-select v-model="roleFilter" placeholder="全部角色" style="width: 150px">
+          <el-option v-for="r in roleOptions" :key="r.value" :label="r.label" :value="r.value" />
+        </el-select>
+      </div>
+
+      <el-table :data="pagedUsers" v-loading="loading" border stripe style="width: 100%" size="default">
+        <el-table-column prop="username" label="用户名" min-width="140" />
+
+        <el-table-column label="角色" width="130">
           <template #default="{ row }">
-            <el-tag :type="roleTag[row.role]" size="small">{{ roleLabels[row.role] || row.role }}</el-tag>
+            <el-tag :type="roleTag[row.role]" size="small" effect="light">
+              {{ roleLabels[row.role] || row.role }}
+            </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="创建时间" min-width="180">
-          <template #default="{ row }">{{ fmt(row.created_at) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="290" fixed="right">
+
+        <el-table-column label="创建时间" width="180">
           <template #default="{ row }">
-            <el-button size="small" @click="openRole(row)">改角色</el-button>
-            <el-button size="small" @click="resetPwd(row)">重置密码</el-button>
-            <el-button size="small" type="danger" @click="removeUser(row)">删除</el-button>
+            <span style="color: var(--text-muted)">{{ fmt(row.created_at) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="300" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" text :icon="'Edit'" @click="openRole(row)">编辑</el-button>
+            <el-button size="small" text :icon="'Lock'" @click="resetPwd(row)">重置密码</el-button>
+            <el-button size="small" text type="danger" :icon="'Delete'" @click="removeUser(row)"></el-button>
           </template>
         </el-table-column>
       </el-table>
+
+      <div class="pagination-bar">
+        <span class="total-text">共 {{ filteredUsers.length }} 条记录</span>
+        <el-pagination
+          v-model:current-page="currentPage"
+          :page-size="pageSize"
+          :total="filteredUsers.length"
+          layout="prev, pager, next"
+          background
+        />
+      </div>
     </template>
 
     <!-- 新建用户 -->
@@ -174,7 +246,7 @@ function fmt(ts) {
         </el-form-item>
         <el-form-item label="角色">
           <el-select v-model="form.role" style="width: 100%">
-            <el-option v-for="r in roleOptions" :key="r.value" :label="r.label" :value="r.value" />
+            <el-option v-for="r in roleOptions.filter(o => o.value)" :key="r.value" :label="r.label" :value="r.value" />
           </el-select>
         </el-form-item>
       </el-form>
@@ -190,7 +262,7 @@ function fmt(ts) {
         <el-form-item label="用户名"><span>{{ editing?.username }}</span></el-form-item>
         <el-form-item label="角色">
           <el-select v-model="editRole" style="width: 100%">
-            <el-option v-for="r in roleOptions" :key="r.value" :label="r.label" :value="r.value" />
+            <el-option v-for="r in roleOptions.filter(o => o.value)" :key="r.value" :label="r.label" :value="r.value" />
           </el-select>
         </el-form-item>
       </el-form>
@@ -204,15 +276,22 @@ function fmt(ts) {
 
 <style scoped>
 .page {
-  padding: 16px;
+  padding: 20px 24px;
 }
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: 12px;
+  margin-bottom: 16px;
 }
-.spacer {
-  flex: 1;
+.pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 16px;
+}
+.total-text {
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 </style>

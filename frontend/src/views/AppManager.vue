@@ -155,33 +155,36 @@ onMounted(async () => {
 
 <template>
   <div class="page">
-    <div class="toolbar">
-      <el-icon><Box /></el-icon>
-      <span style="font-weight: 600">应用管理</span>
-      <div class="spacer"></div>
-      <el-button :icon="'Refresh'" @click="store.refresh()">刷新设备</el-button>
+    <!-- 页面标题 -->
+    <div class="page-header">
+      <div class="page-title">应用管理</div>
+      <div class="page-header-right">
+        <el-button :icon="'Refresh'" @click="store.refresh()">刷新设备</el-button>
+      </div>
     </div>
 
     <!-- ① 单机应用管理 -->
-    <el-card shadow="never" style="margin-bottom: 14px">
-      <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px">
-        <span style="font-weight: 600">① 单机应用管理</span>
-        <el-select
-          v-model="curDeviceId"
-          placeholder="选择设备"
-          filterable
-          style="width: 220px"
-          @change="loadApps"
-        >
-          <el-option
-            v-for="d in store.list"
-            :key="d.id"
-            :label="`${d.name}（${statusText[d.status] || d.status}）`"
-            :value="d.id"
-          />
-        </el-select>
-        <el-button :icon="'Refresh'" :disabled="!curDeviceId" @click="loadApps">刷新应用</el-button>
-        <el-tag type="info">共 {{ apps.length }} 个</el-tag>
+    <el-card shadow="never" class="block">
+      <div class="block-head">
+        <span class="block-title">① 单机应用管理</span>
+        <div class="block-actions">
+          <el-select
+            v-model="curDeviceId"
+            placeholder="选择设备"
+            filterable
+            style="width: 220px"
+            @change="loadApps"
+          >
+            <el-option
+              v-for="d in store.list"
+              :key="d.id"
+              :label="`${d.name}（${statusText[d.status] || d.status}）`"
+              :value="d.id"
+            />
+          </el-select>
+          <el-button :icon="'Refresh'" :disabled="!curDeviceId" @click="loadApps">刷新应用</el-button>
+          <el-tag type="info">共 {{ apps.length }} 个</el-tag>
+        </div>
       </div>
 
       <el-table
@@ -233,7 +236,9 @@ onMounted(async () => {
 
     <!-- ② 批量应用管理 -->
     <el-card shadow="never">
-      <div style="font-weight: 600; margin-bottom: 12px">② 批量应用管理</div>
+      <div class="block-head">
+        <span class="block-title">② 批量应用管理</span>
+      </div>
       <el-row :gutter="14">
         <el-col :span="12">
           <el-table
@@ -255,19 +260,19 @@ onMounted(async () => {
               </template>
             </el-table-column>
           </el-table>
-          <el-tag type="primary" style="margin-top: 8px">已选 {{ batchIds.length }} 台</el-tag>
+          <el-tag type="primary" class="selected-tag">已选 {{ batchIds.length }} 台</el-tag>
         </el-col>
 
         <el-col :span="12">
-          <div style="font-weight: 600; margin-bottom: 8px">按包名批量操作</div>
-          <el-input v-model="batchPkg" placeholder="包名，如 com.android.chrome" clearable style="margin-bottom: 10px" />
-          <el-button-group style="margin-bottom: 16px">
+          <div class="sub-title">按包名批量操作</div>
+          <el-input v-model="batchPkg" placeholder="包名，如 com.android.chrome" clearable class="batch-input" />
+          <el-button-group class="batch-btns">
             <el-button type="success" @click="batchAppAction('launch', '批量启动', false)">批量启动</el-button>
             <el-button type="warning" @click="batchAppAction('stop', '批量强停', false)">批量强停</el-button>
             <el-button type="danger" @click="batchAppAction('uninstall', '批量卸载', true)">批量卸载</el-button>
           </el-button-group>
 
-          <div style="font-weight: 600; margin: 8px 0">批量安装 APK</div>
+          <div class="sub-title">批量安装 APK</div>
           <el-input v-model="batchApk" placeholder="APK 下载地址（URL）">
             <template #append><el-button @click="batchInstall">批量安装</el-button></template>
           </el-input>
@@ -298,24 +303,75 @@ onMounted(async () => {
             v-if="store.batchProgress"
             :percentage="progressPct"
             :status="progressPct === 100 ? 'success' : ''"
-            style="margin-top: 16px"
+            class="batch-progress"
           />
-          <div
-            v-if="store.batchProgress"
-            style="font-size: 12px; color: #86868b; margin-top: 4px"
-          >
+          <div v-if="store.batchProgress" class="batch-progress-text">
             {{ store.batchProgress.action }}：{{ store.batchProgress.done }} /
             {{ store.batchProgress.total }}
           </div>
-          <div v-if="lastResult" style="margin-top: 10px">
+          <div v-if="lastResult" class="result-tags">
             <el-tag type="success">{{ lastResult.label }} 成功 {{ lastResult.ok }}</el-tag>
-            <el-tag v-if="lastResult.failed" type="danger" style="margin-left: 8px"
-              >失败 {{ lastResult.failed }}</el-tag
-            >
-            <el-tag type="info" style="margin-left: 8px">共 {{ lastResult.total }}</el-tag>
+            <el-tag v-if="lastResult.failed" type="danger">失败 {{ lastResult.failed }}</el-tag>
+            <el-tag type="info">共 {{ lastResult.total }}</el-tag>
           </div>
         </el-col>
       </el-row>
     </el-card>
   </div>
 </template>
+
+<style scoped>
+.block {
+  margin-bottom: 14px;
+}
+.block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.block-title {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text-primary);
+}
+.block-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.sub-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary);
+  margin: 8px 0;
+}
+.batch-input {
+  margin-bottom: 10px;
+}
+.batch-btns {
+  margin-bottom: 16px;
+}
+.batch-progress {
+  margin-top: 16px;
+}
+.batch-progress-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+.selected-tag {
+  margin-top: 8px;
+}
+.result-tags {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+}
+:deep(.el-table) {
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+</style>

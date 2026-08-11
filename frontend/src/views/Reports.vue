@@ -92,15 +92,17 @@ onMounted(load)
 
 <template>
   <div class="page reports">
-    <div class="toolbar">
-      <span style="font-weight: 600; font-size: 16px">统计报表</span>
-      <el-tag v-if="errored" type="danger" size="small" effect="plain">数据获取失败</el-tag>
-      <div class="spacer" style="flex: 1"></div>
-      <span class="muted">更新时间：{{ fmtTime(lastUpdated) }}</span>
-      <el-button :icon="'Refresh'" size="small" :loading="loading" @click="load">刷新</el-button>
-      <el-button type="primary" :icon="'Download'" size="small" :loading="exporting" @click="exportCsv">
-        导出 CSV
-      </el-button>
+    <!-- 页面标题 -->
+    <div class="page-header">
+      <div class="page-title">统计报表</div>
+      <div class="page-header-right">
+        <el-tag v-if="errored" type="danger" size="small" effect="plain">数据获取失败</el-tag>
+        <span class="muted">更新时间：{{ fmtTime(lastUpdated) }}</span>
+        <el-button :icon="'Refresh'" :loading="loading" @click="load">刷新</el-button>
+        <el-button type="primary" :icon="'Download'" :loading="exporting" @click="exportCsv">
+          导出 CSV
+        </el-button>
+      </div>
     </div>
 
     <!-- KPI 磁贴 -->
@@ -148,10 +150,10 @@ onMounted(load)
             <el-descriptions-item label="运行总次数">{{ summary.script_runs.total }}</el-descriptions-item>
             <el-descriptions-item label="进行中">{{ summary.script_runs.running }}</el-descriptions-item>
             <el-descriptions-item label="成功">
-              <span style="color: #34c759; font-weight: 600">{{ summary.script_runs.success }}</span>
+              <span style="color: var(--success); font-weight: 600">{{ summary.script_runs.success }}</span>
             </el-descriptions-item>
             <el-descriptions-item label="失败">
-              <span style="color: #ff3b30; font-weight: 600">{{ summary.script_runs.failed }}</span>
+              <span style="color: var(--danger); font-weight: 600">{{ summary.script_runs.failed }}</span>
             </el-descriptions-item>
           </el-descriptions>
           <div class="muted" style="margin-top: 12px">
@@ -210,23 +212,17 @@ onMounted(load)
 
 <style scoped>
 .reports {
-  padding: 16px;
-}
-.reports .toolbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 14px;
+  padding: 20px 24px;
 }
 .reports .muted {
-  color: #86868b;
+  color: var(--text-muted);
   font-size: 12px;
 }
 
 /* KPI 磁贴 */
 .kpi-card {
   margin-bottom: 14px;
-  border-radius: 12px;
+  border-radius: var(--radius);
 }
 .kpi-card :deep(.el-card__body) {
   display: flex;
@@ -246,11 +242,11 @@ onMounted(load)
   font-size: 24px;
   font-weight: 700;
   line-height: 1.1;
-  color: #1d1d1f;
+  color: var(--text-primary);
 }
 .kpi-label {
   font-size: 12px;
-  color: #86868b;
+  color: var(--text-muted);
   margin-top: 2px;
 }
 
@@ -267,11 +263,11 @@ onMounted(load)
 .block-title {
   font-weight: 600;
   font-size: 15px;
-  color: #1d1d1f;
+  color: var(--text-primary);
 }
 .fill {
   height: 100%;
-  border-radius: 12px;
+  border-radius: var(--radius);
 }
 
 /* 横向条形列表 */
@@ -289,7 +285,7 @@ onMounted(load)
   width: 120px;
   flex-shrink: 0;
   font-size: 13px;
-  color: #1d1d1f;
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -297,7 +293,7 @@ onMounted(load)
 .hbar-track {
   flex: 1;
   height: 14px;
-  background: #f0f1f3;
+  background: #f1f5f9;
   border-radius: 7px;
   overflow: hidden;
 }
@@ -308,10 +304,10 @@ onMounted(load)
   transition: width 0.4s ease;
 }
 .hbar-fill.model {
-  background: linear-gradient(90deg, #0a84ff, #5ac8fa);
+  background: linear-gradient(90deg, var(--brand), var(--brand-light));
 }
 .hbar-fill.group {
-  background: linear-gradient(90deg, #5856d6, #af52de);
+  background: linear-gradient(90deg, var(--brand-dark), var(--brand-light));
 }
 .hbar-count {
   width: 40px;
@@ -319,6 +315,6 @@ onMounted(load)
   text-align: right;
   font-size: 13px;
   font-weight: 600;
-  color: #1d1d1f;
+  color: var(--text-primary);
 }
 </style>
