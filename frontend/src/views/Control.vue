@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, markHandled } from '../api/client'
-import { ws } from '../api/ws'
+import { socket as ws } from '../api/ws'
 import { useDevices } from '../stores/devices'
 import PhoneFrame from '../components/PhoneFrame.vue'
 
@@ -43,11 +43,12 @@ function onKeyDown(e) {
     _kbTimer = setTimeout(flushBuffer, 100)
   }
 }
-function toggleKeyboard() {
-  kbEnabled.value = !kbEnabled.value
-  _kbBuf = ''
-  if (_kbTimer) { clearTimeout(_kbTimer); _kbTimer = null }
-}
+watch(kbEnabled, (val) => {
+  if (val) {
+    _kbBuf = ''
+    if (_kbTimer) { clearTimeout(_kbTimer); _kbTimer = null }
+  }
+})
 
 // 脚本录制
 const recording = ref(false)
@@ -222,7 +223,7 @@ async function saveScript() {
         </span>
       </el-tooltip>
       <el-switch v-model="hd" active-text="高清投屏12fps" inactive-text="标准5fps" style="margin-right: 14px" />
-      <el-switch v-model="kbEnabled" active-text="键盘输入" inactive-text="键盘输入" style="margin-right: 14px" @change="toggleKeyboard" />
+      <el-switch v-model="kbEnabled" active-text="键盘输入" inactive-text="键盘输入" style="margin-right: 14px" />
       <el-switch v-model="recording" active-text="录制中" inactive-text="录制脚本" />
       <el-button type="primary" :icon="'Download'" @click="saveScript">保存脚本 ({{ steps.length }})</el-button>
     </div>
