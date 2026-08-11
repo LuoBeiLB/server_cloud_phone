@@ -124,11 +124,13 @@ async function batchInstallUpload() {
     })
     store.batchProgress = { action: '上传安装', done: data.total, total: data.total }
     lastResult.value = { label: '上传安装', ok: data.ok, failed: data.failed, total: data.total }
+
     if (data.failed > 0) {
     ElMessage.error(`上传安装：成功 ${data.ok}/${data.total}，失败 ${data.failed}`)
 } else {
     ElMessage.success(`上传安装完成：成功 ${data.ok}/${data.total}`)
 }
+
   } catch (e) {
     ElMessage.error(e?.response?.data?.detail || '上传安装失败')
   }
