@@ -24,6 +24,19 @@ from ..ws_manager import manager
 
 router = APIRouter()
 
+_KEYEVENT_MAP = {
+    "enter": "KEYCODE_ENTER",
+    "backspace": "KEYCODE_DEL",
+    "delete": "KEYCODE_FORWARD_DEL",
+    "tab": "KEYCODE_TAB",
+    "escape": "KEYCODE_ESCAPE",
+    "arrow_up": "KEYCODE_DPAD_UP",
+    "arrow_down": "KEYCODE_DPAD_DOWN",
+    "arrow_left": "KEYCODE_DPAD_LEFT",
+    "arrow_right": "KEYCODE_DPAD_RIGHT",
+    "space": "KEYCODE_SPACE",
+}
+
 
 async def _preview_loop(ws: WebSocket, state: dict) -> None:
     """按订阅列表周期性渲染并推送预览帧。"""
@@ -71,6 +84,23 @@ async def ws_endpoint(ws: WebSocket) -> None:
             if msg.get("type") == "subscribe":
                 state["device_ids"] = msg.get("device_ids", [])
                 state["fps"] = msg.get("fps", 1)
+            elif msg.get("type") == "input_text":
+                device_id = msg.get("device_id")
+                text = msg.get("text", "")
+                if device_id and text:
+                    async with SessionLocal() as db:
+                        device = (await db.execute(select(Device).where(Device.id == device_id))).scalar_one_or_none()
+                    if device:
+                        await backend.input_text(device, text)
+            elif msg.get("type") == "key_event":
+                device_id = msg.get("device_id")
+                key = msg.get("key", "")
+                if device_id and key:
+                    async with SessionLocal() as db:
+                        device = (await db.execute(select(Device).where(Device.id == device_id))).scalar_one_or_none()
+                    if device:
+                        code = _KEYEVENT_MAP.get(key, key)
+                        await backend.key(device, code)
     except WebSocketDisconnect:
         pass
     except Exception:  # noqa: BLE001
