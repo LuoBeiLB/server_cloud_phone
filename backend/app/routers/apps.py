@@ -22,6 +22,10 @@ from ..models import Device
 from .. import services
 from ..ws_manager import manager
 
+import tempfile
+import os
+from fastapi import UploadFile, File, Form
+
 router = APIRouter(tags=["apps"], dependencies=[Depends(get_current_user)])
 
 
@@ -139,3 +143,30 @@ async def batch_install(body: BatchAppInstall, db: AsyncSession = Depends(get_db
         await services.backend.install(d, body.apk_url)
 
     return await _run_all(db, body.device_ids, "app_install", fn)
+
+@router.post("/apps/batch/install-upload")
+async def batch_install_upload(
+    device_ids: str = Form(...),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    # 1. 把前端传来的 "1,2,3" 字符串解析成 [1, 2, 3]
+    ids = [int(x.strip()) for x in device_ids.split(",") if x.strip()]
+
+    # 2. 把上传的文件流落到本地临时文件
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".apk") as tmp:
+        tmp_path = tmp.name
+        while True:
+            chunk = await file.read(1024 * 1024)  # 每次读 1MB
+            if not chunk:
+                break
+            tmp.write(chunk)
+
+    # 3. 用 _run_all 并发安装到所有设备，完成后删临时文件
+    try:
+        async def fn(d: Device) -> None:
+            await services.backend.install_from_local_file(d, tmp_path)
+
+        return await _run_all(db, ids, "app_install_upload", fn)
+    finally:
+        os.remove(tmp_path)  # 不管成功失败都清理临时文件

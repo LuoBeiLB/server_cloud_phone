@@ -494,6 +494,15 @@ class RedroidBackend(DeviceBackend):
         # 简化：容器内下载再安装；生产可先落地宿主再 adb install
         await self._adb(device, "shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", apk_url)
 
+    async def install_from_local_file(self, device: Device, local_path: str) -> None:
+    #"""把后端临时目录里的 APK 推送到设备并安装。"""
+    # 1. 从文件路径取出文件名，拼出设备上的目标路径
+        remote_path = "/sdcard/" + os.path.basename(local_path)
+    # 2. 复用已有的 push_file 把文件推到设备（它内部调的是 adb push）
+        await self.push_file(device, local_path, remote_path)
+    # 3. 用 pm install 安装（-r 表示覆盖安装）
+        await self._adb(device, "shell", "pm", "install", "-r", remote_path)
+        
     async def list_apps(self, device: Device) -> list[str]:
         # 优先列第三方应用（-3），再补一份全量（去桌面/输入法等系统噪声后仍可见常用系统应用）
         packages: set[str] = set()

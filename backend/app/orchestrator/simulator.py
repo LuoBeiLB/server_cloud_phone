@@ -176,7 +176,9 @@ class SimulatorBackend(DeviceBackend):
         if pkg not in rt["apps"]:
             rt["apps"].append(pkg)
         self._act(device, f"安装 {pkg}（来自 {apk_url}）")
-
+    async def install_from_local_file(self, device: Device, local_path: str) -> None:
+        print("=== SIMULATOR install_from_local_file 被调用了 ===")
+        raise RuntimeError("模拟器后端不支持安装本地 APK，请在 redroid 环境中测试")
     async def screenshot(self, device: Device) -> str:
         rt = self._rt(device)
         if not rt["running"]:
