@@ -249,10 +249,6 @@ const statusText = { running: '运行中', stopped: '已停止', creating: '创�
       <div class="page-title">设备管理</div>
       <div class="page-header-right">
         <el-button @click="openSkinDlg">一键换肤</el-button>
-        <el-button
-          :disabled="!selected.length"
-          @click="selected.forEach(d => act(api.startDevice, d.id, '已重启'))"
-        >批量重启</el-button>
         <el-button type="danger" :disabled="!selected.length" :loading="deleting" @click="batchRemove">批量删除</el-button>
         <el-button type="primary" @click="createDlg = true">+ 添加设备</el-button>
       </div>
@@ -290,6 +286,7 @@ const statusText = { running: '运行中', stopped: '已停止', creating: '创�
       @selection-change="onSelectionChange"
     >
       <el-table-column type="selection" width="42" reserve-selection />
+      <el-table-column prop="id" label="ID" width="70" />
       <el-table-column prop="name" label="设备名" min-width="120" />
       <el-table-column label="型号" min-width="130">
         <template #default="{ row }">{{ row.fingerprint?.device?.model || '—' }}</template>
@@ -334,6 +331,9 @@ const statusText = { running: '运行中', stopped: '已停止', creating: '创�
           <span v-else-if="row.skin">{{ skinLabel(row.skin) }}</span>
           <span v-else class="muted">—</span>
         </template>
+      </el-table-column>
+      <el-table-column label="当前页面" min-width="200" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.current_url || ' — ' }}</template>
       </el-table-column>
       <el-table-column label="操作" width="420" fixed="right">
         <template #default="{ row }">
