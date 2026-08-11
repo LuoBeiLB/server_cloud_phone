@@ -24,12 +24,17 @@ from ..ws_manager import manager
 
 router = APIRouter()
 
+# 预览帧率上限 60fps（前端可选 10~60）。
+# 实际能跑多高取决于单帧截图耗时：simulator 渲染快基本能跑满；
+# 真机 screencap ~64ms，≈15fps 封顶 —— 这里只放开间隔钳制，不硬顶设备。
+MAX_PREVIEW_FPS = 60
+
 
 async def _preview_loop(ws: WebSocket, state: dict) -> None:
     """按订阅列表周期性渲染并推送预览帧。"""
     while True:
         ids = state.get("device_ids", [])
-        interval = max(0.3, 1.0 / max(1, state.get("fps", 1)))
+        interval = max(1.0 / MAX_PREVIEW_FPS, 1.0 / max(1, min(MAX_PREVIEW_FPS, state.get("fps", 1))))
         if ids:
             async with SessionLocal() as db:
                 devices = list(
