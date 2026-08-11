@@ -129,7 +129,7 @@ export const useDevices = defineStore('devices', {
       if (!this.previewIds.length) return
 
       // 下限 80ms → 单机「高清投屏」可到 ~10-12fps（后端 /screenshot ~64ms 能跟上）
-      const interval = Math.max(80, Math.round(1000 / fps))
+      const interval = Math.max(16, Math.round(1000 / fps))
       const force = this.previewIds.length <= 3
       let busy = false
       const tick = async () => {

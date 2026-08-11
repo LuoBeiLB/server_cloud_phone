@@ -42,32 +42,53 @@ const scrcpyTip = computed(() =>
     ? '未部署 ws-scrcpy 投屏服务。部署后在后端设 CLOUD_WS_SCRCPY_BASE=http://<地址>:8100 即可启用'
     : !device.value?.adb_port
       ? '该设备无 adb 端口（模拟后端不支持 scrcpy 投屏）'
-      : '低延迟 H.264 投屏（新窗口打开）',
+      : '低延迟 H.264 投屏，可直接操控（点按/滑动）',
 )
 const scrcpyDisabled = computed(() => !wsScrcpyBase.value || !device.value?.adb_port)
 
-function openScrcpy() {
-  if (scrcpyDisabled.value) return ElMessage.warning(scrcpyTip.value)
+// 投屏地址（新窗口打开和内嵌共用同一份拼装逻辑，改一处两处同步）
+const scrcpyUrl = computed(() => {
+  if (scrcpyDisabled.value) return ''
   const udid = `localhost:${device.value.adb_port}`
   const base = wsScrcpyBase.value.replace(/\/+$/, '')
   const wsProto = base.startsWith('https') ? 'wss' : 'ws'
   const innerWs =
     `${wsProto}://${base.replace(/^https?:\/\//, '')}` +
     `/?action=proxy-adb&remote=tcp:8886&udid=${encodeURIComponent(udid)}`
-  window.open(
+  return (
     `${base}/#!action=stream&udid=${encodeURIComponent(udid)}` +
-      `&player=broadway&ws=${encodeURIComponent(innerWs)}`,
-    '_blank',
+    `&player=broadway&ws=${encodeURIComponent(innerWs)}`
   )
+})
+
+// 内嵌投屏：把 H.264 实时画面直接嵌进手机框位置，ws-scrcpy 播放器自带
+// 鼠标操控（点按/滑动），嵌入后手机窗口即可直接操作，无需再开新窗口。
+// 开启时停掉截图预览订阅省带宽，关闭时恢复。
+const embedStream = ref(false)
+function toggleEmbed() {
+  if (scrcpyDisabled.value) return ElMessage.warning(scrcpyTip.value)
+  embedStream.value = !embedStream.value
+  if (embedStream.value) {
+    store.subscribePreviews([], 1)
+  } else {
+    subscribe()
+  }
+}
+function openScrcpy() {
+  if (scrcpyDisabled.value) return ElMessage.warning(scrcpyTip.value)
+  window.open(scrcpyUrl.value, '_blank')
 }
 
-// 高清投屏：开启后拉到 ~12fps（后端 /screenshot ~64ms 能跟上），更接近视频流
-const hd = ref(false)
+// 预览帧率：10-60 可选，改动立即重新订阅生效。
+// 真机受后端 screencap ~64ms 物理限制，实际趋近 ~15fps；模拟器可跑满。
+const fps = ref(10)
+const fpsOptions = [10, 15, 20, 30, 45, 60]
 function subscribe() {
-  store.subscribePreviews([id.value], hd.value ? 12 : 5)
+  if (embedStream.value) return // 内嵌投屏期间不订截图帧
+  store.subscribePreviews([id.value], fps.value)
 }
 watch(id, subscribe)
-watch(hd, subscribe)
+watch(fps, subscribe)
 onMounted(async () => {
   if (!device.value) await store.refresh()
   url.value = device.value?.current_url || ''
@@ -113,9 +134,86 @@ async function openUrl() {
 async function onTap(pt) {
   await ctl('tap', pt)
 }
+// 手机窗口拖动手势（控屏 swiper）：PhoneFrame 已把拖动轨迹换算成
+// 设备坐标的 x1,y1 -> x2,y2 和实际拖动时长，直接透传给后端
+async function onSwipe(p) {
+  await ctl('swipe', p)
+}
 async function key(k) {
   await ctl('key', { key: k })
 }
+
+// ---------- 物理键盘同步 ----------
+// 开启后，敲自己电脑的键盘 = 在手机上打字：可打印字符走 text 注入，
+// 退格 / 回车 / 方向键映射为 keyevent（真机即 adb shell input ...）。
+//
+// 三个坑：
+// 1. 监听挂 window 而不是画面元素 —— 点过画面后焦点不一定留在画面上，
+//    挂 window 才稳；但必须过滤 e.target，否则在右侧网址框打字也会转发到手机。
+// 2. 连打不能并发发请求：多个 POST 在路上的到达顺序不保证，会出乱序字。
+//    用串行 Promise 队列保序，再加 40ms 小缓冲把连续字符合并成一段，
+//    一句话往往只发 1-2 个请求，顺序和效率都保住。
+// 3. e.isComposing（中文输入法组字中）必须跳过：转发半成品拼音会留残字。
+//    且 adb input text 本身只支持 ASCII —— 中文请用右侧「文本输入」整段发送。
+const kbdSync = ref(false)
+let kbdQueue = Promise.resolve() // 串行队列
+let kbdBuf = '' // 待发送的字符缓冲
+let kbdBufTimer = null
+
+function kbdSend(fn) {
+  kbdQueue = kbdQueue.then(fn).catch(() => {})
+}
+
+function flushKbdBuf() {
+  if (!kbdBuf) return
+  const text = kbdBuf
+  kbdBuf = ''
+  // record: false —— 键盘同步是高频操作，逐段录进脚本会把录制列表刷屏
+  kbdSend(() => ctl('text', { text }, { record: false }))
+}
+
+const KBD_KEYMAP = {
+  Backspace: 'KEYCODE_DEL',
+  Enter: 'enter',
+  ArrowUp: 'KEYCODE_DPAD_UP',
+  ArrowDown: 'KEYCODE_DPAD_DOWN',
+  ArrowLeft: 'KEYCODE_DPAD_LEFT',
+  ArrowRight: 'KEYCODE_DPAD_RIGHT',
+}
+
+function onKbdKeydown(e) {
+  if (!kbdSync.value) return
+  // 正在页面自己的输入框里打字（网址/文本/下拉搜索等）：不转发、不抢按键
+  const t = e.target
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+  if (e.ctrlKey || e.metaKey || e.altKey) return // 组合快捷键留给浏览器
+  if (e.isComposing) return // 中文组字中不转发
+
+  const mapped = KBD_KEYMAP[e.key]
+  if (mapped) {
+    e.preventDefault()
+    flushKbdBuf() // 特殊键之前先把缓冲的字符发出去，保住顺序
+    kbdSend(() => ctl('key', { key: mapped }, { record: false }))
+  } else if (e.key.length === 1) {
+    e.preventDefault()
+    kbdBuf += e.key
+    clearTimeout(kbdBufTimer)
+    kbdBufTimer = setTimeout(flushKbdBuf, 40)
+  }
+}
+
+watch(kbdSync, (on) => {
+  if (on) {
+    window.addEventListener('keydown', onKbdKeydown)
+    ElMessage.success('键盘已连接：直接打字即输入到手机（中文请用右侧文本框整段发送）')
+  } else {
+    window.removeEventListener('keydown', onKbdKeydown)
+    flushKbdBuf()
+  }
+})
+onBeforeUnmount(() => {
+  if (kbdSync.value) window.removeEventListener('keydown', onKbdKeydown)
+})
 
 // CP-007 分辨率/DPI 运行时切换
 const displayPresets = [
@@ -181,27 +279,83 @@ async function saveScript() {
       <div class="spacer"></div>
       <el-tooltip :content="scrcpyTip" placement="bottom">
         <span>
-          <el-button :icon="'VideoCamera'" :disabled="scrcpyDisabled" @click="openScrcpy">
-            scrcpy 投屏(H.264)
+          <el-button
+            :icon="'VideoCamera'"
+            :type="embedStream ? 'danger' : 'default'"
+            :disabled="scrcpyDisabled"
+            @click="toggleEmbed"
+          >
+            {{ embedStream ? '关闭投屏' : '内嵌投屏(H.264)' }}
           </el-button>
         </span>
       </el-tooltip>
-      <el-switch v-model="hd" active-text="高清投屏12fps" inactive-text="标准5fps" style="margin-right: 14px" />
+      <el-tooltip content="在新窗口打开投屏" placement="bottom">
+        <span>
+          <el-button :icon="'TopRight'" :disabled="scrcpyDisabled" circle @click="openScrcpy" />
+        </span>
+      </el-tooltip>
+      <el-select v-model="fps" style="width: 100px; margin-right: 14px">
+        <el-option v-for="f in fpsOptions" :key="f" :label="`${f} fps`" :value="f" />
+      </el-select>
       <el-switch v-model="recording" active-text="录制中" inactive-text="录制脚本" />
       <el-button type="primary" :icon="'Download'" @click="saveScript">保存脚本 ({{ steps.length }})</el-button>
     </div>
 
     <div style="display: flex; gap: 26px; padding: 8px 0">
       <div style="width: 300px">
+        <!-- 内嵌投屏模式：H.264 实时画面直接占住手机框位置，可点可滑 -->
+        <div
+          v-if="embedStream"
+          style="
+            width: 100%;
+            background: #000;
+            border-radius: 18px;
+            overflow: hidden;
+            border: 3px solid #1d1d1f;
+          "
+          :style="{ aspectRatio: `${device.width} / ${device.height}` }"
+        >
+          <iframe
+            :src="scrcpyUrl"
+            style="width: 100%; height: 100%; border: 0; display: block"
+            allow="autoplay"
+          ></iframe>
+        </div>
+        <!-- 预览帧模式：截图画面 + 手势操控（点按/滑动） -->
         <PhoneFrame
+          v-else
           :device="device"
           :frame="store.frames[device.id]"
           :last-action="store.lastActions[device.id]"
           clickable
+          swipeable
           @tap="onTap"
+          @swipe="onSwipe"
         />
         <div style="text-align: center; color: #86868b; font-size: 12px; margin-top: 8px">
-          点击画面 = 触屏点击（实时映射到设备坐标）
+          {{ embedStream ? '投屏画面内直接点按/拖动即可操控' : '点击画面 = 点按；按住拖动 = 滑动（实时映射设备坐标）' }}
+        </div>
+        <!-- 物理键盘同步开关：开启后电脑键盘直接输入到手机 -->
+        <div
+          v-if="!embedStream"
+          style="
+            margin-top: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 10px;
+            border-radius: 8px;
+          "
+          :style="kbdSync ? 'background: #e8f3ff; outline: 1px solid #0a84ff55' : 'background: #f5f5f7'"
+        >
+          <el-switch v-model="kbdSync" active-text="键盘同步" />
+          <span style="color: #86868b; font-size: 12px; line-height: 1.4">
+            {{
+              kbdSync
+                ? '已连接：打字=输入，支持退格/回车/方向键；中文用右侧文本框整段发'
+                : '开启后敲电脑键盘直接输入到手机'
+            }}
+          </span>
         </div>
       </div>
 
@@ -234,7 +388,7 @@ async function saveScript() {
 
         <el-card shadow="never" style="margin-bottom: 14px">
           <div style="font-weight: 600; margin-bottom: 10px">文本输入</div>
-          <el-input v-model="textInput" placeholder="输入文本后发送到焦点框" @keyup.enter="sendText">
+          <el-input v-model="textInput" placeholder="输入文本后发送到焦点框（支持中文）" @keyup.enter="sendText">
             <template #append><el-button @click="sendText">发送</el-button></template>
           </el-input>
         </el-card>
