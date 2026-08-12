@@ -301,55 +301,41 @@ async function saveScript() {
       <el-button type="primary" :icon="'Download'" @click="saveScript">保存脚本 ({{ steps.length }})</el-button>
     </div>
 
-    <div style="display: flex; gap: 26px; padding: 8px 0">
-      <div style="width: 300px">
-        <!-- 内嵌投屏模式：H.264 实时画面直接占住手机框位置，可点可滑 -->
-        <div
-          v-if="embedStream"
-          style="
-            width: 100%;
-            background: #000;
-            border-radius: 18px;
-            overflow: hidden;
-            border: 3px solid #1d1d1f;
-          "
-          :style="{ aspectRatio: `${device.width} / ${device.height}` }"
-        >
-          <iframe
-            :src="scrcpyUrl"
-            style="width: 100%; height: 100%; border: 0; display: block"
-            allow="autoplay"
-          ></iframe>
+    <div class="ctrl-layout">
+      <!-- ===== 左：手机画面 ===== -->
+      <div class="phone-panel">
+        <div class="phone-card">
+          <!-- 内嵌投屏模式：H.264 实时画面直接占住手机框位置，可点可滑 -->
+          <div
+            v-if="embedStream"
+            class="embed-frame"
+            :style="{ aspectRatio: `${device.width} / ${device.height}` }"
+          >
+            <iframe
+              :src="scrcpyUrl"
+              class="embed-iframe"
+              allow="autoplay"
+            ></iframe>
+          </div>
+          <!-- 预览帧模式：截图画面 + 手势操控（点按/滑动） -->
+          <PhoneFrame
+            v-else
+            :device="device"
+            :frame="store.frames[device.id]"
+            :last-action="store.lastActions[device.id]"
+            clickable
+            swipeable
+            @tap="onTap"
+            @swipe="onSwipe"
+          />
         </div>
-        <!-- 预览帧模式：截图画面 + 手势操控（点按/滑动） -->
-        <PhoneFrame
-          v-else
-          :device="device"
-          :frame="store.frames[device.id]"
-          :last-action="store.lastActions[device.id]"
-          clickable
-          swipeable
-          @tap="onTap"
-          @swipe="onSwipe"
-        />
-        <div style="text-align: center; color: #86868b; font-size: 12px; margin-top: 8px">
+        <div class="phone-hint">
           {{ embedStream ? '投屏画面内直接点按/拖动即可操控' : '点击画面 = 点按；按住拖动 = 滑动（实时映射设备坐标）' }}
         </div>
         <!-- 物理键盘同步开关：开启后电脑键盘直接输入到手机 -->
-        <div
-          v-if="!embedStream"
-          style="
-            margin-top: 10px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 10px;
-            border-radius: 8px;
-          "
-          :style="kbdSync ? 'background: #e8f3ff; outline: 1px solid #0a84ff55' : 'background: #f5f5f7'"
-        >
-          <el-switch v-model="kbdSync" active-text="键盘同步" />
-          <span style="color: #86868b; font-size: 12px; line-height: 1.4">
+        <div v-if="!embedStream" class="kbd-sync" :class="{ on: kbdSync }">
+          <el-switch v-model="kbdSync" active-text="键盘同步" style="width: 40%;" />
+          <span class="kbd-tip" style="width: 60%">
             {{
               kbdSync
                 ? '已连接：打字=输入，支持退格/回车/方向键；中文用右侧文本框整段发'
@@ -359,51 +345,220 @@ async function saveScript() {
         </div>
       </div>
 
-      <div style="flex: 1; max-width: 520px">
-        <el-card shadow="never" style="margin-bottom: 14px">
-          <div style="font-weight: 600; margin-bottom: 10px">浏览器 / 网页</div>
+      <!-- ===== 右：操控面板 ===== -->
+      <div class="ctrl-panel">
+        <el-card shadow="never" class="ctrl-card">
+          <div class="card-title">浏览器 / 网页</div>
           <el-input v-model="url" placeholder="https://…" @keyup.enter="openUrl">
             <template #append><el-button @click="openUrl">打开</el-button></template>
           </el-input>
         </el-card>
 
-        <el-card shadow="never" style="margin-bottom: 14px">
-          <div style="font-weight: 600; margin-bottom: 10px">导航与手势</div>
-          <el-button-group>
-            <el-button :icon="'Back'" @click="key('back')">返回</el-button>
-            <el-button :icon="'HomeFilled'" @click="key('home')">主页</el-button>
-            <el-button :icon="'Menu'" @click="key('menu')">菜单</el-button>
-            <el-button :icon="'Files'" @click="key('recent')">最近</el-button>
-          </el-button-group>
-          <el-button-group style="margin-left: 12px">
-            <el-button :icon="'Top'" @click="swipe('up')">上滑滚动</el-button>
-            <el-button :icon="'Bottom'" @click="swipe('down')">下滑滚动</el-button>
-          </el-button-group>
-          <el-button-group style="margin-left: 12px">
-            <el-button :icon="'Bell'" @click="key('notifications')">通知栏</el-button>
-            <el-button :icon="'Setting'" @click="key('quicksettings')">控制中心</el-button>
-            <el-button :icon="'ArrowUpBold'" @click="key('collapse')">收起</el-button>
-          </el-button-group>
+        <el-card shadow="never" class="ctrl-card">
+          <div class="card-title">导航与手势</div>
+          <div class="nav-section">
+            <div class="nav-group">
+              <span class="nav-label">导航键</span>
+              <div class="nav-btns">
+                <el-button :icon="'Back'" @click="key('back')">返回</el-button>
+                <el-button :icon="'HomeFilled'" @click="key('home')">主页</el-button>
+                <el-button :icon="'Menu'" @click="key('menu')">菜单</el-button>
+                <el-button :icon="'Files'" @click="key('recent')">最近</el-button>
+              </div>
+            </div>
+            <div class="nav-group">
+              <span class="nav-label">滚动</span>
+              <div class="nav-btns">
+                <el-button :icon="'Top'" @click="swipe('up')">上滑滚动</el-button>
+                <el-button :icon="'Bottom'" @click="swipe('down')">下滑滚动</el-button>
+              </div>
+            </div>
+            <div class="nav-group">
+              <span class="nav-label">系统面板</span>
+              <div class="nav-btns">
+                <el-button :icon="'Bell'" @click="key('notifications')">通知栏</el-button>
+                <el-button :icon="'Setting'" @click="key('quicksettings')">控制中心</el-button>
+                <el-button :icon="'ArrowUpBold'" @click="key('collapse')">收起</el-button>
+              </div>
+            </div>
+          </div>
         </el-card>
 
-        <el-card shadow="never" style="margin-bottom: 14px">
-          <div style="font-weight: 600; margin-bottom: 10px">文本输入</div>
+        <el-card shadow="never" class="ctrl-card">
+          <div class="card-title">文本输入</div>
           <el-input v-model="textInput" placeholder="输入文本后发送到焦点框（支持中文）" @keyup.enter="sendText">
             <template #append><el-button @click="sendText">发送</el-button></template>
           </el-input>
         </el-card>
 
-        <el-card shadow="never">
-          <div style="font-weight: 600; margin-bottom: 10px">显示（分辨率 / DPI）</div>
-          <el-select v-model="displaySel" style="width: 200px">
-            <el-option v-for="(p, i) in displayPresets" :key="i" :label="p.label" :value="i" />
-          </el-select>
-          <el-button style="margin-left: 10px" @click="applyDisplay">应用</el-button>
-          <span style="margin-left: 10px; color: #86868b; font-size: 12px">
-            当前 {{ device.width }}×{{ device.height }} @{{ device.dpi }}
-          </span>
+        <el-card shadow="never" class="ctrl-card">
+          <div class="card-title">显示（分辨率 / DPI）</div>
+          <div class="display-row">
+            <el-select v-model="displaySel" class="display-sel">
+              <el-option v-for="(p, i) in displayPresets" :key="i" :label="p.label" :value="i" />
+            </el-select>
+            <el-button type="primary" :icon="'Check'" @click="applyDisplay">应用</el-button>
+            <span class="display-current">当前 {{ device.width }}×{{ device.height }} @{{ device.dpi }}</span>
+          </div>
         </el-card>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+/* ===== 左右布局：左手机画面 / 右操控面板 ===== */
+.ctrl-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 28px;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 8px 0;
+}
+
+/* ---- 左：手机画面 ---- */
+.phone-panel {
+  width: min(360px, 42vh);
+  flex-shrink: 0;
+  position: sticky;
+  top: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+.phone-card {
+  width: 100%;
+  padding: 16px;
+  background: linear-gradient(145deg, #f8fafc, #eef2ff);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.phone-card :deep(.phone) {
+  width: 100%;
+  margin: 0;
+}
+.embed-frame {
+  width: 100%;
+  background: #000;
+  border-radius: 22px;
+  overflow: hidden;
+  border: 3px solid #1d1d1f;
+}
+.embed-iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+.phone-hint {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: 10px;
+  line-height: 1.5;
+}
+.kbd-sync {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: #f5f5f7;
+  border: 1px solid transparent;
+  transition: background 0.2s, border-color 0.2s;
+  height: 70px;
+}
+.kbd-sync.on {
+  background: #e8f3ff;
+  border-color: #0a84ff55;
+}
+.kbd-tip {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* ---- 右：操控面板 ---- */
+.ctrl-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.ctrl-card {
+  border-radius: var(--radius);
+}
+.card-title {
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+
+/* 导航与手势：分组 + 网格按钮，不再挤成一行 */
+.nav-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.nav-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.nav-label {
+  flex-shrink: 0;
+  width: 60px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.nav-btns {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(126px, 1fr));
+  gap: 10px;
+}
+.nav-btns .el-button {
+  width: 100%;
+  margin-left: 0;
+}
+.nav-btns .el-button + .el-button {
+  margin-left: 0;
+}
+
+/* 显示行 */
+.display-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.display-sel {
+  width: 220px;
+}
+.display-current {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* 窄屏回退：上下堆叠 */
+@media (max-width: 1100px) {
+  .ctrl-layout {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .phone-panel {
+    width: 100%;
+    max-width: 400px;
+    margin: 0 auto;
+    position: static;
+  }
+}
+</style>

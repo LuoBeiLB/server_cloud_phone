@@ -10,8 +10,10 @@ const deviceId = ref(null)
 const path = ref(ROOT)
 const items = ref([])
 const loading = ref(false)
+const searching = ref(false)
 const uploading = ref(false)
 const fileInput = ref(null)
+let searchTimer = null
 
 // 多选 & 分页
 const selected = ref([])
@@ -73,17 +75,22 @@ function joinPath(dir, name) {
   return dir.replace(/\/+$/, '') + '/' + name
 }
 
-async function loadDevices() {
+// 设备下拉：远程查询筛选。默认不查询任何数据，输入关键字才请求匹配的 10 条
+async function loadDevices(q) {
+  if (!q) return
+  searching.value = true
   try {
-    const { data } = await api.listDevices()
-    devices.value = data || []
-    if (!deviceId.value && devices.value.length) {
-      deviceId.value = devices.value[0].id
-      await loadFiles()
-    }
+    const { data } = await api.listDevices({ q, page: 1, page_size: 10 })
+    devices.value = data?.items || []
   } catch {
     ElMessage.error('设备列表获取失败')
+  } finally {
+    searching.value = false
   }
+}
+function searchDevices(q) {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => loadDevices(q), 300)
 }
 
 async function loadFiles() {
@@ -207,7 +214,9 @@ function newFolder() {
   ElMessage.info('新建文件夹功能开发中')
 }
 
-onMounted(loadDevices)
+onMounted(() => {
+  // 设备下拉默认不查询任何数据，由用户搜索选择设备后加载文件
+})
 </script>
 
 <template>
@@ -227,6 +236,9 @@ onMounted(loadDevices)
         size="default"
         style="width: 220px"
         filterable
+        remote
+        :loading="searching"
+        :remote-method="searchDevices"
         @change="onDeviceChange"
       >
         <el-option v-for="d in devices" :key="d.id" :label="d.name" :value="d.id" />

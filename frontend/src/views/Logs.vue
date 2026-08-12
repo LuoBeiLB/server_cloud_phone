@@ -17,21 +17,33 @@ const deviceId = ref(null)
 const lines = ref(200)
 const logLines = ref([])
 const loading = ref(false)
+const searching = ref(false)
 const autoRefresh = ref(false)
 const lastUpdated = ref(null)
 const logBox = ref(null)
 let timer = null
+let searchTimer = null
 
 const currentDevice = computed(() => devices.value.find((d) => d.id === deviceId.value) || null)
 
-async function loadDevices() {
+// 设备下拉：远程查询筛选。默认不查询任何数据，输入关键字才请求匹配的 10 条
+async function loadDevices(q) {
+  if (!q) return
+  searching.value = true
   try {
-    const { data } = await http.get('/devices')
-    devices.value = data
-    if (!deviceId.value && data.length) deviceId.value = data[0].id
+    const { data } = await http.get('/devices', {
+      params: { q, page: 1, page_size: 10 },
+    })
+    devices.value = data?.items || []
   } catch (e) {
     ElMessage.error('设备列表获取失败')
+  } finally {
+    searching.value = false
   }
+}
+function searchDevices(q) {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => loadDevices(q), 300)
 }
 
 async function loadLogs() {
@@ -79,12 +91,12 @@ function fmtTime(d) {
   return d ? d.toLocaleTimeString('zh-CN', { hour12: false }) : '—'
 }
 
-onMounted(async () => {
-  await loadDevices()
-  await loadLogs()
+onMounted(() => {
+  // 设备下拉默认不查询任何数据，由用户搜索选择后加载日志
 })
 onBeforeUnmount(() => {
   if (timer) clearInterval(timer)
+  if (searchTimer) clearTimeout(searchTimer)
 })
 </script>
 
@@ -100,7 +112,16 @@ onBeforeUnmount(() => {
 
     <div class="toolbar">
       <span class="muted">设备</span>
-      <el-select v-model="deviceId" placeholder="选择设备" size="small" style="width: 200px" filterable>
+      <el-select
+        v-model="deviceId"
+        placeholder="选择设备"
+        size="small"
+        style="width: 200px"
+        filterable
+        remote
+        :loading="searching"
+        :remote-method="searchDevices"
+      >
         <el-option v-for="d in devices" :key="d.id" :label="`${d.name} (#${d.id})`" :value="d.id">
           <span>{{ d.name }}</span>
           <el-tag :type="statusMeta(d.status).tag" size="small" effect="plain" style="margin-left: 8px">

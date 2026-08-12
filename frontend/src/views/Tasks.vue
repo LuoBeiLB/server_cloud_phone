@@ -59,7 +59,7 @@ const form = reactive({
 function resetForm() {
   form.name = ''
   form.action = 'open_url'
-  form.device_ids = store.list.map((d) => d.id)
+  form.device_ids = devices.value.map((d) => d.id)
   form.schedule_type = 'once'
   form.run_at = new Date(Date.now() + 60 * 1000)
   form.interval_seconds = 60
@@ -99,7 +99,9 @@ async function load() {
   }
 }
 
-function openCreate() {
+async function openCreate() {
+  // 下拉默认不查询任何数据；打开弹窗后由用户搜索选择设备
+  devices.value = []
   resetForm()
   dlg.value = true
 }
@@ -170,12 +172,38 @@ const fmt = (v) => (v ? new Date(v).toLocaleString() : '—')
 
 const deviceName = (id) => store.byId(id)?.name || `#${id}`
 
+// 任务可选设备：远程查询筛选。默认不查询任何数据，输入关键字才请求匹配的 10 条
+const devices = ref([])
+const searching = ref(false)
+let searchTimer = null
+async function loadDevices(q) {
+  if (!q) return
+  searching.value = true
+  try {
+    const { data } = await http.get('/devices', {
+      params: { q, page: 1, page_size: 10 },
+    })
+    devices.value = data?.items || []
+  } catch {
+    devices.value = []
+  } finally {
+    searching.value = false
+  }
+}
+function searchDevices(q) {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => loadDevices(q), 300)
+}
+
 onMounted(async () => {
   await store.refresh()
   await load()
   timer = setInterval(load, 5000)
 })
-onBeforeUnmount(() => timer && clearInterval(timer))
+onBeforeUnmount(() => {
+  if (timer) clearInterval(timer)
+  if (searchTimer) clearTimeout(searchTimer)
+})
 </script>
 
 <template>
@@ -282,8 +310,17 @@ onBeforeUnmount(() => timer && clearInterval(timer))
         </el-form-item>
 
         <el-form-item label="目标设备">
-          <el-select v-model="form.device_ids" multiple filterable style="width: 100%" placeholder="选择设备">
-            <el-option v-for="d in store.list" :key="d.id" :label="d.name" :value="d.id" />
+          <el-select
+            v-model="form.device_ids"
+            multiple
+            filterable
+            remote
+            :loading="searching"
+            :remote-method="searchDevices"
+            style="width: 100%"
+            placeholder="选择设备"
+          >
+            <el-option v-for="d in devices" :key="d.id" :label="d.name" :value="d.id" />
           </el-select>
         </el-form-item>
 

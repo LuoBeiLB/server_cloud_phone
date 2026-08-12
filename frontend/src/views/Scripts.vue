@@ -15,6 +15,27 @@ const chosen = ref([])
 const lastRun = ref(null)
 const running = ref(false)
 
+// 回放可选设备：远程查询筛选。默认不查询任何数据，输入关键字才请求匹配的 10 条
+const devices = ref([])
+const searching = ref(false)
+let searchTimer = null
+async function loadDevices(q) {
+  if (!q) return
+  searching.value = true
+  try {
+    const { data } = await api.listDevices({ q, page: 1, page_size: 10 })
+    devices.value = data?.items || []
+  } catch {
+    devices.value = []
+  } finally {
+    searching.value = false
+  }
+}
+function searchDevices(q) {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => loadDevices(q), 300)
+}
+
 // ---------- 可视化编辑 ----------
 const editDlg = ref(false)
 const editing = ref({ id: null, name: '', description: '', steps: [] })
@@ -215,10 +236,11 @@ async function exportScript(s) {
 }
 
 // ---------- 回放 ----------
-function openRun(s) {
+async function openRun(s) {
   current.value = s
-  chosen.value = store.list.map((d) => d.id)
+  chosen.value = []
   lastRun.value = null
+  devices.value = [] // 默认不查询任何数据，搜索后才有选项
   runDlg.value = true
 }
 async function doRun() {
@@ -475,8 +497,17 @@ function stepSummary(step) {
     <!-- ===== 回放 ===== -->
     <el-dialog v-model="runDlg" :title="`回放：${current?.name}`" width="560px">
       <div style="margin-bottom: 8px">选择目标设备（{{ chosen.length }} 台）</div>
-      <el-select v-model="chosen" multiple filterable style="width: 100%" placeholder="选择设备">
-        <el-option v-for="d in store.list" :key="d.id" :label="`${d.name} · ${d.fingerprint?.network?.exit_ip}`" :value="d.id" />
+      <el-select
+        v-model="chosen"
+        multiple
+        filterable
+        remote
+        :loading="searching"
+        :remote-method="searchDevices"
+        style="width: 100%"
+        placeholder="选择设备"
+      >
+        <el-option v-for="d in devices" :key="d.id" :label="`${d.name} · ${d.fingerprint?.network?.exit_ip}`" :value="d.id" />
       </el-select>
 
       <div v-if="lastRun" style="margin-top: 16px">
