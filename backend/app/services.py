@@ -150,3 +150,42 @@ async def broadcast_device(device: Device) -> None:
     await manager.broadcast(
         {"type": "device_status", "device": DeviceOut.model_validate(device).model_dump()}
     )
+async def start_devices_concurrent(
+    db_factory,
+    devices: list[Device],
+    max_concurrent: int = 5,
+    target_url: str | None = None,
+) -> None:
+    """后台并发启动多台设备。每台独立 DB session 避免提交冲突。
+
+    db_factory 应为 async_sessionmaker（如 database.SessionLocal），
+    用于创建独立 session，避免与请求 session 冲突。
+    """
+    import asyncio
+
+    sem = asyncio.Semaphore(max_concurrent)
+
+    async def _start_one(device: Device):
+        async with sem:
+            async with db_factory() as db:
+                device_in_db = await db.get(Device, device.id)
+                if device_in_db is None:
+                    return
+                try:
+                    await backend.start(device_in_db)
+                    device_in_db.status = DeviceStatus.running
+                    device_in_db.last_error = None
+                    if target_url:
+                        await backend.open_url(device_in_db, target_url)
+                except Exception as e:
+                    device_in_db.status = DeviceStatus.error
+                    device_in_db.last_error = _describe_failure(e)
+                    logger.warning(
+                        "设备 %s(%s) 后台启动失败：%s",
+                        device_in_db.id, device_in_db.name, device_in_db.last_error,
+                    )
+                await db.commit()
+                await db.refresh(device_in_db)
+                await broadcast_device(device_in_db)
+
+    await asyncio.gather(*[_start_one(d) for d in devices])

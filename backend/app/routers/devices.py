@@ -66,25 +66,57 @@ async def create_device(body: DeviceCreate, db: AsyncSession = Depends(get_db)) 
 
 @router.post("/batch", response_model=list[DeviceOut])
 async def batch_create(body: DeviceBatchCreate, db: AsyncSession = Depends(get_db)) -> list[Device]:
-    """一键创建/启动 N 台云手机（demo 验收 §2 建机）。"""
+    """一键创建/启动 N 台云手机。优先从预热池分配，池空走异步创建+后台并发启动。"""
+    from ..pool import pool
+
     base = len((await db.execute(select(Device.id))).all())
     devices: list[Device] = []
-    # 并发拉起，提高 demo 建机体验
-    async def _one(i: int) -> Device:
-        return await services.create_device(
+
+    for i in range(1, body.count + 1):
+        name = f"{body.name_prefix}-{base + i:03d}"
+
+        # 优先从预热池取已启动的设备
+        pooled = await pool.acquire()
+        if pooled is not None:
+            pooled_in_db = await db.get(Device, pooled.id)
+            if pooled_in_db is not None:
+                pooled_in_db.name = name
+                pooled_in_db.group_id = body.group_id
+                if body.target_url:
+                    pooled_in_db.current_url = body.target_url
+                await db.commit()
+                await db.refresh(pooled_in_db)
+                await services.broadcast_device(pooled_in_db)
+                devices.append(pooled_in_db)
+                continue
+
+        # 池子空了，走异步创建（不自动启动，后台并发启动）
+        device = await services.create_device(
             db,
-            name=f"{body.name_prefix}-{base + i:03d}",
+            name=name,
             group_id=body.group_id,
             width=body.width,
             height=body.height,
             dpi=body.dpi,
             target_url=body.target_url,
-            auto_start=body.auto_start,
+            auto_start=False,  # 不阻塞，后台并发启动
+        )
+        devices.append(device)
+
+    # 后台并发启动非池子的设备（池子设备已经是 running）
+    non_pooled = [d for d in devices if d.status != DeviceStatus.running]
+    if non_pooled:
+        from ..database import SessionLocal
+
+        asyncio.create_task(
+            services.start_devices_concurrent(
+                db_factory=SessionLocal,
+                devices=non_pooled,
+                max_concurrent=5,
+                target_url=body.target_url,
+            )
         )
 
-    # SQLite 单连接不宜高并发写，顺序建；Postgres 可改并发
-    for i in range(1, body.count + 1):
-        devices.append(await _one(i))
     return devices
 
 
