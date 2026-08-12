@@ -28,6 +28,14 @@ function resolveFrontendIndex() {
   return candidates.find((p) => fs.existsSync(p)) || null;
 }
 
+/** 解析窗口/任务栏图标（开发态用 frontend/public/logo.png，打包态用 resources/frontend/logo.png） */
+function resolveWindowIcon() {
+  const candidates = app.isPackaged
+    ? [path.join(process.resourcesPath, 'frontend', 'logo.png')]
+    : [path.join(__dirname, '..', 'frontend', 'public', 'logo.png')];
+  return candidates.find((p) => fs.existsSync(p)) || undefined;
+}
+
 function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -35,6 +43,7 @@ function createMainWindow() {
     minWidth: 1024,
     minHeight: 700,
     title: '云手机群控客户端',
+    icon: resolveWindowIcon(), // 窗口标题栏/任务栏使用 logo
     show: false, // ready-to-show 后再显示，避免白屏闪烁
     autoHideMenuBar: false,
     webPreferences: {
@@ -168,6 +177,7 @@ if (!gotLock) {
   });
 
   app.whenReady().then(() => {
+    app.setAppUserModelId('com.cloudphone.pcclient'); // Windows 任务栏图标归属
     buildMenu();
     createMainWindow();
 
