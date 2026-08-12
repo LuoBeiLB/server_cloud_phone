@@ -28,7 +28,7 @@ const roleLabels = { superadmin: '超级管理员', admin: '管理员', operator
   <el-container style="height: 100%">
     <el-aside width="220px" class="sidebar">
       <div class="sidebar-logo">
-        <div class="sidebar-logo-icon">📱</div>
+        <img src="/logo.png" class="sidebar-logo-img" alt="logo" />
         <div>
           <div class="sidebar-logo-title">云手机群控</div>
           <div class="sidebar-logo-sub">Cloud Console</div>
@@ -61,12 +61,12 @@ const roleLabels = { superadmin: '超级管理员', admin: '管理员', operator
         </template>
       </el-menu>
       <div class="sidebar-user">
-        <div class="avatar">{{ (auth.user?.username || 'AD').slice(0, 2).toUpperCase() }}</div>
+        <!-- <div class="avatar">{{ (auth.user?.username || 'AD').slice(0, 2).toUpperCase() }}</div> -->
         <div class="info">
           <div class="name">{{ auth.user?.username || 'Admin' }}</div>
           <div class="role">{{ roleLabels[auth.user?.role] || '管理员' }}</div>
         </div>
-        <el-icon style="color: #94a3b8; cursor: pointer" @click="logout"><Setting /></el-icon>
+        <el-icon style="color: #94a3b8; cursor: pointer" @click="logout"><SwitchButton /></el-icon>
       </div>
     </el-aside>
     <el-container>
@@ -116,7 +116,7 @@ const roleLabels = { superadmin: '超级管理员', admin: '管理员', operator
   display: flex; align-items: center; gap: 10px;
   padding: 18px 20px 14px;
 }
-.sidebar-logo-icon { font-size: 24px; }
+.sidebar-logo-img { width: 28px; height: 28px; object-fit: contain; border-radius: 6px; }
 .sidebar-logo-title { font-size: 16px; font-weight: 700; color: #fff; line-height: 1.2; }
 .sidebar-logo-sub { font-size: 11px; color: #64748b; margin-top: 2px; }
 

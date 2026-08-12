@@ -99,6 +99,13 @@ class DeviceOut(BaseModel):
         from_attributes = True
 
 
+class DevicePage(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    items: list[DeviceOut]
+
+
 # --------- 单机操控 ---------
 class TapCmd(BaseModel):
     x: int

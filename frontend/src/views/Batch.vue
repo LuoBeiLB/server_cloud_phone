@@ -11,16 +11,31 @@ const url = ref('https://example.com')
 const apk = ref('https://example.com/app.apk')
 const textVal = ref('hello')
 
+// 设备列表：服务端分页懒加载（翻页才请求，不一次全量）
+// selected 集合跨页累积，翻页不清空；「全选」作用于当前页
+const devices = ref([])
+const page = ref(1)
+const pageSize = ref(12)
+const total = ref(0)
+const pageDevices = computed(() => devices.value)
+
+async function loadDevices() {
+  const { data } = await api.listDevices({ page: page.value, page_size: pageSize.value })
+  devices.value = data?.items || []
+  total.value = data?.total || 0
+}
+
 const selectedIds = computed(() => [...selected.value])
-const allSelected = computed(() => store.list.length > 0 && selected.value.size === store.list.length)
+const allSelected = computed(() => devices.value.length > 0 && selected.value.size === devices.value.length)
 
 function toggle(d) {
   selected.value.has(d.id) ? selected.value.delete(d.id) : selected.value.add(d.id)
   selected.value = new Set(selected.value)
 }
 function toggleAll() {
+  // 分页模式下「全选」作用于当前页；跨页勾选可逐页累积
   if (allSelected.value) selected.value = new Set()
-  else selected.value = new Set(store.list.map((d) => d.id))
+  else selected.value = new Set(devices.value.map((d) => d.id))
 }
 
 async function run(action, body, label) {
@@ -31,7 +46,7 @@ async function run(action, body, label) {
     // 不依赖 WS：直接按响应把进度置满，并让预览立即走一次轮询刷新（画面反映新页面）
     store.batchProgress = { action, done: data.total, total: data.total }
     store.lastWsFrameAt = 0
-    await store.refresh()
+    await loadDevices()
     ElMessage.success(`${label}：成功 ${data.ok}/${data.total}`)
   } catch (e) {
     ElMessage.error(e?.response?.data?.detail || '批量操作失败')
@@ -44,10 +59,15 @@ const progressPct = computed(() => {
 })
 
 function subscribe() {
-  store.subscribePreviews(store.list.map((d) => d.id), 1)
+  store.subscribePreviews(pageDevices.value.map((d) => d.id), 1)
+}
+async function onPageChange(p) {
+  page.value = p
+  await loadDevices()
+  subscribe()
 }
 onMounted(async () => {
-  await store.refresh()
+  await loadDevices()
   subscribe()
 })
 onBeforeUnmount(() => store.subscribePreviews([], 1))
@@ -60,9 +80,9 @@ onBeforeUnmount(() => store.subscribePreviews([], 1))
       <div class="page-title">批量操控</div>
       <div class="page-header-right">
         <el-tag :type="selected.size ? 'success' : 'danger'" effect="dark">
-          已选 {{ selected.size }} / {{ store.list.length }}
+          已选 {{ selected.size }} 台 / 共 {{ total }} 台
         </el-tag>
-        <el-button @click="toggleAll">{{ allSelected ? '取消全选' : '全选' }}</el-button>
+        <el-button @click="toggleAll">{{ allSelected ? '取消本页全选' : '全选本页' }}</el-button>
       </div>
     </div>
 
@@ -75,7 +95,7 @@ onBeforeUnmount(() => store.subscribePreviews([], 1))
       :closable="false"
       show-icon
       class="mb"
-      title="请先在下方勾选要操作的设备（点卡片左上角复选框，或用「全选」），否则下发按钮不可用"
+      title="请先在下方勾选要操作的设备（点卡片左上角复选框，或用「全选本页」；跨页可逐页勾选累积），否则下发按钮不可用"
     />
 
     <el-card shadow="never" class="block">
@@ -119,7 +139,7 @@ onBeforeUnmount(() => store.subscribePreviews([], 1))
 
     <div class="device-grid">
       <PhoneFrame
-        v-for="d in store.list"
+        v-for="d in pageDevices"
         :key="d.id"
         :device="d"
         :frame="store.frames[d.id]"
@@ -130,7 +150,19 @@ onBeforeUnmount(() => store.subscribePreviews([], 1))
         @open="toggle(d)"
       />
     </div>
-    <el-empty v-if="!store.list.length" description="暂无设备" />
+    <div class="pagination-bar">
+      <span class="page-info">共 {{ total }} 台设备</span>
+      <el-pagination
+        :current-page="page"
+        :total="total"
+        :page-size="pageSize"
+        layout="prev, pager, next"
+        background
+        small
+        @current-change="onPageChange"
+      />
+    </div>
+    <el-empty v-if="!total" description="暂无设备" />
   </div>
 </template>
 
@@ -159,5 +191,15 @@ onBeforeUnmount(() => store.subscribePreviews([], 1))
   display: grid;
   grid-template-columns: repeat(6, 1fr);
   gap: 14px;
+}
+.pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+}
+.page-info {
+  color: var(--text-secondary);
+  font-size: 13px;
 }
 </style>

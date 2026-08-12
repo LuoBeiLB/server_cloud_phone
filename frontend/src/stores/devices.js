@@ -23,6 +23,10 @@ let pollTimer = null
 export const useDevices = defineStore('devices', {
   state: () => ({
     list: [],
+    total: 0,
+    page: 1,
+    pageSize: 10,
+    creating: false,
     groups: [],
     frames: {}, // device_id -> data URL 预览帧
     lastActions: {}, // device_id -> 最近一次操作的可读描述（后端返回）
@@ -47,8 +51,15 @@ export const useDevices = defineStore('devices', {
     // 让页面能显示「数据可能不是最新」而不是安静地展示旧列表。
     async refresh(params) {
       try {
-        const { data } = await api.listDevices(params)
-        this.list = data
+        const query = { page: this.page, page_size: this.pageSize, ...(params || {}) }
+        const { data } = await api.listDevices(query)
+        if (Array.isArray(data)) {
+          this.list = data
+          this.total = data.length
+        } else {
+          this.list = data.items || []
+          this.total = data.total || 0
+        }
         this.loadError = ''
         return true
       } catch (e) {
@@ -68,7 +79,7 @@ export const useDevices = defineStore('devices', {
     upsert(device) {
       const i = this.list.findIndex((d) => d.id === device.id)
       if (i >= 0) this.list[i] = device
-      else this.list.push(device)
+      else if (!this.creating) this.list.push(device)
     },
     remove(id) {
       this.list = this.list.filter((d) => d.id !== id)

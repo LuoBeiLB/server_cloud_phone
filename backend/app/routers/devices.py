@@ -15,6 +15,7 @@ from ..schemas import (
     DeviceBatchDelete,
     DeviceCreate,
     DeviceOut,
+    DevicePage,
     DeviceUpdate,
 )
 from .. import services
@@ -29,21 +30,57 @@ async def _get_or_404(db: AsyncSession, device_id: int) -> Device:
     return device
 
 
-@router.get("", response_model=list[DeviceOut])
+@router.get("", response_model=DevicePage)
 async def list_devices(
     db: AsyncSession = Depends(get_db),
     group_id: int | None = None,
+    ungrouped: bool = Query(False, description="只看未分组设备（group_id 为空）"),
     status: DeviceStatus | None = None,
-    q: str | None = Query(None, description="按名称模糊搜索"),
-) -> list[Device]:
+    q: str | None = Query(None, description="\u641c\u7d22\u8bbe\u5907\u540d/IP/\u578b\u53f7/\u5e8f\u5217\u53f7/Android ID/\u8bbe\u5907ID"),
+    page: int | None = Query(None, ge=1),
+    page_size: int | None = Query(None, ge=1, le=100),
+) -> dict:
+    from sqlalchemy import func, or_
+
     stmt = select(Device).order_by(Device.id)
-    if group_id is not None:
+    if ungrouped:
+        stmt = stmt.where(Device.group_id.is_(None))
+    elif group_id is not None:
         stmt = stmt.where(Device.group_id == group_id)
     if status is not None:
         stmt = stmt.where(Device.status == status)
     if q:
-        stmt = stmt.where(Device.name.ilike(f"%{q}%"))
-    return list((await db.execute(stmt)).scalars().all())
+        from sqlalchemy import cast, String
+
+        kw = f"%{q}%"
+        # fingerprint 是 JSON 列。**不能**用 func.json_extract —— 那是 SQLite(JSON1) 专属，
+        # Postgres 没有该函数，搜索会 UndefinedFunctionError → 500（线上真实事故）。
+        # 也不能用 `.astext`（Postgres JSONB 专属，SQLite 会 AttributeError）。
+        # 通用做法：整列 cast 成字符串后模糊匹配，两种库都原生支持，
+        # 一并覆盖模型/序列号/Android ID/出口 IP 等所有嵌套字段。
+        stmt = stmt.where(
+            or_(
+                Device.name.ilike(kw),
+                cast(Device.fingerprint, String).ilike(kw),
+                Device.current_url.ilike(kw),
+            )
+        )
+
+    # count total
+    count_stmt = select(func.count()).select_from(stmt.subquery())
+    total = (await db.execute(count_stmt)).scalar() or 0
+
+    # 前端不传分页参数时默认返回全部；传了 page/page_size 才分页
+    if page is not None and page_size is not None:
+        stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+    items = list((await db.execute(stmt)).scalars().all())
+
+    return {
+        "total": total,
+        "page": page or 1,
+        "page_size": page_size if page_size is not None else len(items),
+        "items": items,
+    }
 
 
 @router.post("", response_model=DeviceOut)

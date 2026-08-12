@@ -10,8 +10,10 @@ const deviceId = ref(null)
 const path = ref(ROOT)
 const items = ref([])
 const loading = ref(false)
+const searching = ref(false)
 const uploading = ref(false)
 const fileInput = ref(null)
+let searchTimer = null
 
 // 多选 & 分页
 const selected = ref([])
@@ -73,17 +75,32 @@ function joinPath(dir, name) {
   return dir.replace(/\/+$/, '') + '/' + name
 }
 
-async function loadDevices() {
+// 全量设备缓存：默认查询一次，之后打开下拉直接使用缓存，避免重复请求
+let allDevices = []
+// 设备下拉：默认一次性拉取全部设备；输入关键字时远程搜索匹配的前 10 条
+async function loadDevices(q) {
+  const kw = String(q || '').trim()
+  searching.value = true
   try {
-    const { data } = await api.listDevices()
-    devices.value = data || []
-    if (!deviceId.value && devices.value.length) {
-      deviceId.value = devices.value[0].id
-      await loadFiles()
+    if (kw) {
+      const { data } = await api.listDevices({ q: kw, page: 1, page_size: 10 })
+      devices.value = data?.items || []
+    } else {
+      if (!allDevices.length) {
+        const { data } = await api.listDevices({ page: 1, page_size: 100 })
+        allDevices = data?.items || []
+      }
+      devices.value = allDevices
     }
   } catch {
     ElMessage.error('设备列表获取失败')
+  } finally {
+    searching.value = false
   }
+}
+function searchDevices(q) {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => loadDevices(q), 300)
 }
 
 async function loadFiles() {
@@ -207,7 +224,9 @@ function newFolder() {
   ElMessage.info('新建文件夹功能开发中')
 }
 
-onMounted(loadDevices)
+onMounted(() => {
+  loadDevices() // 默认查询一次全部设备，下拉打开即有数据
+})
 </script>
 
 <template>
@@ -227,6 +246,9 @@ onMounted(loadDevices)
         size="default"
         style="width: 220px"
         filterable
+        remote
+        :loading="searching"
+        :remote-method="searchDevices"
         @change="onDeviceChange"
       >
         <el-option v-for="d in devices" :key="d.id" :label="d.name" :value="d.id" />

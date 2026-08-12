@@ -63,8 +63,71 @@ const batchApk = ref('https://example.com/app.apk')
 const batchIds = computed(() => batchSelected.value.map((d) => d.id))
 const lastResult = ref(null) // {label, ok, failed, total}
 
+// —— 批量选设备表：服务端分页（翻页才请求，不一次全量） ——
+const allDevices = ref([])
+const loadingDevices = ref(false)
+const batchPage = ref(1)
+const batchPageSize = ref(10)
+const batchTotal = ref(0)
+const batchPageDevices = computed(() => allDevices.value)
+
+async function loadBatchDevices() {
+  loadingDevices.value = true
+  try {
+    const { data } = await api.listDevices({ page: batchPage.value, page_size: batchPageSize.value })
+    allDevices.value = data?.items || []
+    batchTotal.value = data?.total || 0
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.detail || '加载设备列表失败')
+  } finally {
+    loadingDevices.value = false
+  }
+}
+
+function onBatchPageChange(p) {
+  batchPage.value = p
+  loadBatchDevices()
+}
+function onBatchSizeChange(size) {
+  batchPageSize.value = size
+  batchPage.value = 1
+  loadBatchDevices()
+}
+
 function onBatchSelect(rows) {
   batchSelected.value = rows
+}
+
+// —— 单机「搜索并选择设备」下拉：远程查询筛选。默认不查询任何数据，输入关键字才请求匹配的 10 条 ——
+const deviceOptions = ref([])
+const searchingDevices = ref(false)
+let deviceSearchTimer = null
+// 全量设备缓存：默认查询一次，之后打开下拉直接使用缓存，避免重复请求
+let allDeviceOptions = []
+
+async function loadDeviceOptions(q) {
+  const kw = String(q || '').trim()
+  searchingDevices.value = true
+  try {
+    if (kw) {
+      const { data } = await api.listDevices({ q: kw, page: 1, page_size: 10 })
+      deviceOptions.value = data?.items || []
+    } else {
+      if (!allDeviceOptions.length) {
+        const { data } = await api.listDevices({ page: 1, page_size: 100 })
+        allDeviceOptions = data?.items || []
+      }
+      deviceOptions.value = allDeviceOptions
+    }
+  } catch {
+    deviceOptions.value = []
+  } finally {
+    searchingDevices.value = false
+  }
+}
+function searchDeviceOptions(q) {
+  clearTimeout(deviceSearchTimer)
+  deviceSearchTimer = setTimeout(() => loadDeviceOptions(q), 300)
 }
 
 async function batchRun(action, label, payload, needConfirm) {
@@ -145,11 +208,8 @@ const statusText = { running: '运行中', stopped: '已停止', creating: '创�
 const statusType = { running: 'success', stopped: 'info', creating: 'warning', error: 'danger' }
 
 onMounted(async () => {
-  await store.refresh()
-  if (store.list.length && !curDeviceId.value) {
-    curDeviceId.value = store.list[0].id
-    await loadApps()
-  }
+  await loadBatchDevices()
+  loadDeviceOptions() // 默认查询一次全部设备，下拉打开即有数据
 })
 </script>
 
@@ -159,24 +219,31 @@ onMounted(async () => {
     <div class="page-header">
       <div class="page-title">应用管理</div>
       <div class="page-header-right">
-        <el-button :icon="'Refresh'" @click="store.refresh()">刷新设备</el-button>
+        <el-button :icon="'Refresh'" :loading="loadingDevices" @click="loadBatchDevices">刷新设备</el-button>
       </div>
     </div>
 
     <!-- ① 单机应用管理 -->
-    <el-card shadow="never" class="block">
+    <el-card shadow="never" class="block app-card">
       <div class="block-head">
-        <span class="block-title">① 单机应用管理</span>
+        <div class="block-title">
+          <el-icon class="block-title-icon"><Box /></el-icon>
+          <span>① 单机应用管理</span>
+        </div>
         <div class="block-actions">
           <el-select
             v-model="curDeviceId"
-            placeholder="选择设备"
+            placeholder="搜索并选择设备"
             filterable
-            style="width: 220px"
+            remote
+            clearable
+            :loading="searchingDevices"
+            :remote-method="searchDeviceOptions"
+            style="width: 260px"
             @change="loadApps"
           >
             <el-option
-              v-for="d in store.list"
+              v-for="d in deviceOptions"
               :key="d.id"
               :label="`${d.name}（${statusText[d.status] || d.status}）`"
               :value="d.id"
@@ -197,35 +264,45 @@ onMounted(async () => {
       >
         <el-table-column prop="i" label="#" width="60" />
         <el-table-column prop="pkg" label="包名" min-width="240" />
-        <el-table-column label="操作" width="320" fixed="right">
+        <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
-            <el-button
-              size="small"
-              type="success"
-              :loading="rowBusy === `${row.pkg}:launch`"
-              @click="appAction('launch', row.pkg, '启动')"
-              >启动</el-button
-            >
-            <el-button
-              size="small"
-              type="warning"
-              :loading="rowBusy === `${row.pkg}:stop`"
-              @click="appAction('stop', row.pkg, '强停')"
-              >强停</el-button
-            >
-            <el-button
-              size="small"
-              :loading="rowBusy === `${row.pkg}:clear`"
-              @click="appAction('clear', row.pkg, '清数据', true)"
-              >清数据</el-button
-            >
-            <el-button
-              size="small"
-              type="danger"
-              :loading="rowBusy === `${row.pkg}:uninstall`"
-              @click="appAction('uninstall', row.pkg, '卸载', true)"
-              >卸载</el-button
-            >
+            <div class="row-ops">
+              <el-button
+                size="small"
+                link
+                type="success"
+                :icon="'VideoPlay'"
+                :loading="rowBusy === `${row.pkg}:launch`"
+                @click="appAction('launch', row.pkg, '启动')"
+                >启动</el-button
+              >
+              <el-button
+                size="small"
+                link
+                type="warning"
+                :icon="'VideoPause'"
+                :loading="rowBusy === `${row.pkg}:stop`"
+                @click="appAction('stop', row.pkg, '强停')"
+                >强停</el-button
+              >
+              <el-button
+                size="small"
+                link
+                :icon="'Brush'"
+                :loading="rowBusy === `${row.pkg}:clear`"
+                @click="appAction('clear', row.pkg, '清数据', true)"
+                >清数据</el-button
+              >
+              <el-button
+                size="small"
+                link
+                type="danger"
+                :icon="'Delete'"
+                :loading="rowBusy === `${row.pkg}:uninstall`"
+                @click="appAction('uninstall', row.pkg, '卸载', true)"
+                >卸载</el-button
+              >
+            </div>
           </template>
         </el-table-column>
         <template #empty>
@@ -235,87 +312,123 @@ onMounted(async () => {
     </el-card>
 
     <!-- ② 批量应用管理 -->
-    <el-card shadow="never">
+    <el-card shadow="never" class="app-card">
       <div class="block-head">
-        <span class="block-title">② 批量应用管理</span>
+        <div class="block-title">
+          <el-icon class="block-title-icon"><Operation /></el-icon>
+          <span>② 批量应用管理</span>
+        </div>
       </div>
-      <el-row :gutter="14">
-        <el-col :span="12">
-          <el-table
-            :data="store.list"
-            border
-            stripe
-            size="small"
-            max-height="360"
-            @selection-change="onBatchSelect"
-          >
-            <el-table-column type="selection" width="46" />
-            <el-table-column prop="id" label="ID" width="60" />
-            <el-table-column prop="name" label="名称" min-width="120" />
-            <el-table-column label="状态" width="90">
-              <template #default="{ row }">
-                <el-tag :type="statusType[row.status]" size="small">{{
-                  statusText[row.status] || row.status
-                }}</el-tag>
-              </template>
-            </el-table-column>
-          </el-table>
-          <el-tag type="primary" class="selected-tag">已选 {{ batchIds.length }} 台</el-tag>
-        </el-col>
+      <!-- 上：选择设备（全量，客户端分页） -->
+      <div class="sub-title">
+        <el-icon><Iphone /></el-icon>
+        选择设备
+      </div>
+      <el-table
+        v-loading="loadingDevices"
+        :data="batchPageDevices"
+        border
+        stripe
+        size="small"
+        max-height="360"
+        row-key="id"
+        @selection-change="onBatchSelect"
+      >
+        <el-table-column type="selection" width="46" reserve-selection />
+        <el-table-column prop="id" label="ID" width="60" />
+        <el-table-column prop="name" label="名称" min-width="140" />
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="statusType[row.status]" size="small">{{
+              statusText[row.status] || row.status
+            }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="IP" min-width="120">
+          <template #default="{ row }">{{ row.fingerprint?.network?.exit_ip || '—' }}</template>
+        </el-table-column>
+        <template #empty>暂无设备</template>
+      </el-table>
+      <div class="pagination-bar">
+        <el-tag type="primary" effect="plain">
+          <el-icon style="vertical-align: -2px; margin-right: 4px"><CircleCheck /></el-icon>
+          已选 {{ batchIds.length }} 台
+        </el-tag>
+        <el-pagination
+          :current-page="batchPage"
+          :page-size="batchPageSize"
+          :total="batchTotal"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next"
+          background
+          small
+          @current-change="onBatchPageChange"
+          @size-change="onBatchSizeChange"
+        />
+      </div>
 
-        <el-col :span="12">
-          <div class="sub-title">按包名批量操作</div>
-          <el-input v-model="batchPkg" placeholder="包名，如 com.android.chrome" clearable class="batch-input" />
-          <el-button-group class="batch-btns">
-            <el-button type="success" @click="batchAppAction('launch', '批量启动', false)">批量启动</el-button>
-            <el-button type="warning" @click="batchAppAction('stop', '批量强停', false)">批量强停</el-button>
-            <el-button type="danger" @click="batchAppAction('uninstall', '批量卸载', true)">批量卸载</el-button>
-          </el-button-group>
+      <!-- 下：批量操作 -->
+      <el-divider content-position="left">批量操作</el-divider>
 
-          <div class="sub-title">批量安装 APK</div>
-          <el-input v-model="batchApk" placeholder="APK 下载地址（URL）">
+      <div class="sub-title">
+        <el-icon><Cpu /></el-icon>
+        按包名批量操作
+      </div>
+      <div class="ops-panel">
+        <div class="batch-row">
+          <el-input v-model="batchPkg" placeholder="包名，如 com.android.chrome" clearable class="batch-pkg" />
+          <el-button type="success" @click="batchAppAction('launch', '批量启动', false)">批量启动</el-button>
+          <el-button type="warning" @click="batchAppAction('stop', '批量强停', false)">批量强停</el-button>
+          <el-button type="danger" @click="batchAppAction('uninstall', '批量卸载', true)">批量卸载</el-button>
+        </div>
+      </div>
+      <div class="sub-title">
+        <el-icon><Upload /></el-icon>
+        批量安装 APK
+      </div>
+      <div class="ops-panel">
+        <div class="batch-row">
+          <el-input v-model="batchApk" placeholder="APK 下载地址（URL）" class="batch-apk">
             <template #append><el-button @click="batchInstall">批量安装</el-button></template>
           </el-input>
-          <!-- 上传安装 -->
-<div style="margin-bottom: 12px;">
-  <el-upload
-    :auto-upload="false"
-    :limit="1"
-    accept=".apk"
-    :on-change="(f) => batchFile = f.raw"
-    :on-remove="() => batchFile = null"
-  >
-    <el-button type="primary" plain>选择 APK 文件</el-button>
-    <template #tip>
-      <div class="el-upload__tip">选择一个本地 APK 文件，然后点下方按钮安装到已选设备</div>
-    </template>
-  </el-upload>
-  <el-button
-    type="primary"
-    :disabled="!batchFile || !batchIds.length"
-    @click="batchInstallUpload"
-    style="margin-top: 8px;"
-  >
-    上传安装到已选设备（{{ batchIds.length }}台）
-  </el-button>
-</div>
-          <el-progress
-            v-if="store.batchProgress"
-            :percentage="progressPct"
-            :status="progressPct === 100 ? 'success' : ''"
-            class="batch-progress"
-          />
-          <div v-if="store.batchProgress" class="batch-progress-text">
-            {{ store.batchProgress.action }}：{{ store.batchProgress.done }} /
-            {{ store.batchProgress.total }}
-          </div>
-          <div v-if="lastResult" class="result-tags">
-            <el-tag type="success">{{ lastResult.label }} 成功 {{ lastResult.ok }}</el-tag>
-            <el-tag v-if="lastResult.failed" type="danger">失败 {{ lastResult.failed }}</el-tag>
-            <el-tag type="info">共 {{ lastResult.total }}</el-tag>
-          </div>
-        </el-col>
-      </el-row>
+          <el-upload
+            :auto-upload="false"
+            :limit="1"
+            accept=".apk"
+            :on-change="(f) => batchFile = f.raw"
+            :on-remove="() => batchFile = null"
+            class="batch-upload"
+          >
+            <el-button type="primary" plain>选择 APK 文件</el-button>
+          </el-upload>
+          <el-button
+            type="primary"
+            :disabled="!batchFile || !batchIds.length"
+            @click="batchInstallUpload"
+          >
+            上传安装到已选设备（{{ batchIds.length }}台）
+          </el-button>
+        </div>
+        <div class="el-upload__tip">
+          选择一个本地 APK 文件，然后点击「上传安装到已选设备」安装到已勾选设备
+        </div>
+      </div>
+
+      <el-progress
+        v-if="store.batchProgress"
+        :percentage="progressPct"
+        :status="progressPct === 100 ? 'success' : ''"
+        class="batch-progress"
+      />
+      <div v-if="store.batchProgress" class="batch-progress-text">
+        {{ store.batchProgress.action }}：{{ store.batchProgress.done }} /
+        {{ store.batchProgress.total }}
+      </div>
+      <div v-if="lastResult" class="result-tags">
+        <el-tag type="success">{{ lastResult.label }} 成功 {{ lastResult.ok }}</el-tag>
+        <el-tag v-if="lastResult.failed" type="danger">失败 {{ lastResult.failed }}</el-tag>
+        <el-tag type="info">共 {{ lastResult.total }}</el-tag>
+      </div>
     </el-card>
   </div>
 </template>
@@ -323,6 +436,16 @@ onMounted(async () => {
 <style scoped>
 .block {
   margin-bottom: 14px;
+}
+/* 卡片：与其他页面统一的边框/圆角/阴影过渡 */
+.app-card {
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  transition: box-shadow .2s;
+}
+.app-card:hover {
+  box-shadow: var(--shadow-lg);
 }
 .block-head {
   display: flex;
@@ -332,9 +455,16 @@ onMounted(async () => {
   margin-bottom: 14px;
 }
 .block-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 600;
   font-size: 15px;
   color: var(--text-primary);
+}
+.block-title-icon {
+  color: var(--brand);
+  font-size: 16px;
 }
 .block-actions {
   display: flex;
@@ -343,16 +473,48 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 .sub-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-weight: 600;
   font-size: 14px;
   color: var(--text-primary);
-  margin: 8px 0;
+  margin: 10px 0 8px;
 }
-.batch-input {
-  margin-bottom: 10px;
+.sub-title .el-icon {
+  color: var(--brand);
 }
-.batch-btns {
-  margin-bottom: 16px;
+.batch-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+/* 批量操作面板：容器化，与其它页面卡片风格一致 */
+.ops-panel {
+  padding: 14px;
+  background: var(--bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 4px;
+}
+.ops-panel .batch-row:last-child {
+  margin-bottom: 0;
+}
+.ops-panel :deep(.el-upload__tip) {
+  margin-top: 8px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+.batch-pkg {
+  width: 320px;
+}
+.batch-apk {
+  width: 380px;
+}
+.batch-upload {
+  display: inline-flex;
 }
 .batch-progress {
   margin-top: 16px;
@@ -362,16 +524,40 @@ onMounted(async () => {
   color: var(--text-muted);
   margin-top: 4px;
 }
-.selected-tag {
-  margin-top: 8px;
-}
 .result-tags {
-  margin-top: 10px;
+  margin-top: 12px;
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  background: var(--bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm);
+}
+.row-ops {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.row-ops .el-button + .el-button {
+  margin-left: 0;
+}
+.pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
 }
 :deep(.el-table) {
   border-radius: var(--radius-sm);
   overflow: hidden;
+}
+/* 表头：与其他页面一致的灰底加粗 */
+:deep(.el-table__header th) {
+  background: #f8fafc !important;
+  color: var(--text-secondary);
+  font-weight: 600;
 }
 </style>

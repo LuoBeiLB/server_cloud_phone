@@ -32,42 +32,43 @@ const form = ref({
   auto_start: true,
 })
 
-// 当前筛选结果：状态 / 分组 + 关键词（设备名/IP/型号/序列号/Android ID/设备号，忽略大小写）。
-// 以前只匹配 d.name，但搜索框提示的是「设备名/IP/型号」，按 IP 或型号搜永远 0 条。
-const filtered = computed(() => {
-  const q = String(filter.value.q || '').trim().toLowerCase()
-  return store.list.filter((d) => {
-    if (filter.value.status && d.status !== filter.value.status) return false
-    if (filter.value.group_id && d.group_id !== filter.value.group_id) return false
-    if (q) {
-      const haystack = [
-        d.name,
-        d.fingerprint?.device?.model,
-        d.fingerprint?.device?.serialno,
-        d.fingerprint?.device?.android_id,
-        d.fingerprint?.network?.exit_ip,
-        String(d.id),
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase()
-      if (!haystack.includes(q)) return false
-    }
-    return true
-  })
-})
+// Server-side filtering and pagination: filter changes trigger API refresh
+const page = computed(() => store.page)
 
-// 分页：每页 8 台，与分页栏展示一致；表格用 paged 渲染，勾选跨页保留（reserve-selection）
-const pageSize = 8
-const page = ref(1)
-const paged = computed(() => {
-  const start = (page.value - 1) * pageSize
-  return filtered.value.slice(start, start + pageSize)
+function onFilterChange() {
+  store.page = 1
+  store.refresh({
+    q: filter.value.q || undefined,
+    status: filter.value.status || undefined,
+    group_id: filter.value.group_id || undefined,
+  })
+}
+
+// Debounce search input
+let searchTimer = null
+watch(() => filter.value.q, () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(onFilterChange, 300)
 })
-watch(filter, () => { page.value = 1 }, { deep: true }) // 筛选变化回到第一页
+watch(() => filter.value.status, onFilterChange)
+watch(() => filter.value.group_id, onFilterChange)
+
+function onPageChange(p) {
+  store.page = p
+  store.refresh({
+    q: filter.value.q || undefined,
+    status: filter.value.status || undefined,
+    group_id: filter.value.group_id || undefined,
+  })
+}
 
 onMounted(async () => {
-  store.refresh()
+  store.page = 1
+  store.refresh({
+    q: filter.value.q || undefined,
+    status: filter.value.status || undefined,
+    group_id: filter.value.group_id || undefined,
+  })
   store.refreshGroups()
   store.refreshSkinApplying()
   try {
@@ -83,7 +84,7 @@ async function applySkinRow(id, theme) {
   try {
     await api.applySkin(id, theme)
     ElMessage.success(`已换肤：${skinLabel(theme)} · 真机后台落地中，进度见「皮肤」列`)
-    await store.refresh()
+    await store.refresh({ q: filter.value.q || undefined, status: filter.value.status || undefined, group_id: filter.value.group_id || undefined })
   } catch (e) {
     ElMessage.error(e?.response?.data?.detail || '换肤失败')
   }
@@ -110,7 +111,7 @@ async function applySkinBatch() {
       `已为 ${r.data.count} 台设备换肤：${skinLabel(skinForm.value.theme)} · 真机逐台落地中，进度见「皮肤」列`,
     )
     skinDlg.value = false
-    await store.refresh()
+    await store.refresh({ q: filter.value.q || undefined, status: filter.value.status || undefined, group_id: filter.value.group_id || undefined })
   } catch (e) {
     ElMessage.error(e?.response?.data?.detail || '换肤失败')
   } finally {
@@ -120,16 +121,18 @@ async function applySkinBatch() {
 
 async function batchCreate() {
   creating.value = true
+  store.creating = true
   try {
     await api.batchCreate(form.value)
     ElMessage.success(`已创建 ${form.value.count} 台云手机`)
     createDlg.value = false
-    await store.refresh()
+    await store.refresh({ q: filter.value.q || undefined, status: filter.value.status || undefined, group_id: filter.value.group_id || undefined })
     await store.refreshGroups()
   } catch (e) {
     ElMessage.error(e?.response?.data?.detail || '创建失败')
   } finally {
     creating.value = false
+    store.creating = false
   }
 }
 
@@ -137,7 +140,7 @@ async function act(fn, id, okMsg) {
   try {
     await fn(id)
     if (okMsg) ElMessage.success(okMsg)
-    await store.refresh()
+    await store.refresh({ q: filter.value.q || undefined, status: filter.value.status || undefined, group_id: filter.value.group_id || undefined })
   } catch (e) {
     ElMessage.error(e?.response?.data?.detail || '操作失败')
   }
@@ -156,7 +159,7 @@ async function rename(d) {
   } catch {
     return // 失败提示由 api/client.js 的兜底统一给出；不要继续往下走假装成功
   }
-  await store.refresh()
+  await store.refresh({ q: filter.value.q || undefined, status: filter.value.status || undefined, group_id: filter.value.group_id || undefined })
   ElMessage.success('已重命名')
 }
 
@@ -164,10 +167,10 @@ async function assignGroup(d, gid) {
   try {
     await api.updateDevice(d.id, { group_id: gid })
   } catch {
-    await store.refresh() // 回滚界面上的乐观显示，避免看起来改成功了
+    await store.refresh({ q: filter.value.q || undefined, status: filter.value.status || undefined, group_id: filter.value.group_id || undefined }) // 回滚界面上的乐观显示，避免看起来改成功了
     return
   }
-  await store.refresh()
+  await store.refresh({ q: filter.value.q || undefined, status: filter.value.status || undefined, group_id: filter.value.group_id || undefined })
   await store.refreshGroups()
 }
 
@@ -175,6 +178,7 @@ async function assignGroup(d, gid) {
 // 切后端 / 跑过冒烟测试后常留下几十台废设备，一台台点删除不可接受。
 const selected = ref([])
 const deleting = ref(false)
+const tableRef = ref(null)
 function onSelectionChange(rows) {
   selected.value = rows
 }
@@ -202,19 +206,28 @@ async function batchRemove() {
     } else {
       ElMessage.success(`已删除 ${data.ok} 台`)
     }
+    // 清空勾选：selected 只是数据层，表格内部 reserve-selection 仍保留勾选状态，
+    // 必须调用 clearSelection() 才会同步清掉 UI 上的勾选（否则已删 id 残留、全选计数错乱）
     selected.value = []
+    tableRef.value?.clearSelection()
   } catch {
     return // 提示由 api/client.js 兜底
   } finally {
     deleting.value = false
   }
-  await store.refresh()
+  await store.refresh({ q: filter.value.q || undefined, status: filter.value.status || undefined, group_id: filter.value.group_id || undefined })
   await store.refreshGroups()
 }
 
 async function remove(d) {
   await ElMessageBox.confirm(`删除设备「${d.name}」？`, '确认', { type: 'warning' })
+  const wasSelected = selected.value.some((x) => x.id === d.id)
   await act(api.deleteDevice, d.id, '已删除')
+  // 若删除的是已勾选设备，清空表格内部保留的勾选（reserve-selection 不会自动移除）
+  if (wasSelected) {
+    selected.value = []
+    tableRef.value?.clearSelection()
+  }
 }
 
 async function newGroup() {
@@ -274,12 +287,13 @@ const statusText = { running: '运行中', stopped: '已停止', creating: '创�
       </el-select>
       <el-button size="small" link @click="newGroup">+ 新建分组</el-button>
       <div class="spacer"></div>
-      <span class="device-count">共 {{ store.list.length }} 台设备</span>
+      <span class="device-count">共 {{ store.total }} 台设备</span>
     </div>
 
     <!-- 设备表格 -->
     <el-table
-      :data="paged"
+      ref="tableRef"
+      :data="store.list"
       stripe
       style="width: 100%"
       row-key="id"
@@ -363,19 +377,20 @@ const statusText = { running: '运行中', stopped: '已停止', creating: '创�
     <!-- 分页 -->
     <div class="pagination-bar">
       <span class="page-info">
-        显示第 {{ filtered.length ? (page - 1) * pageSize + 1 : 0 }}-{{ Math.min(page * pageSize, filtered.length) }} 条，共 {{ filtered.length }} 条
+        显示第 {{ store.total ? (store.page - 1) * store.pageSize + 1 : 0 }}-{{ Math.min(store.page * store.pageSize, store.total) }} 条，共 {{ store.total }} 条
       </span>
       <el-pagination
-        v-model:current-page="page"
-        :total="filtered.length"
-        :page-size="pageSize"
+        :current-page="store.page"
+        :total="store.total"
+        :page-size="store.pageSize"
         layout="prev, pager, next"
         small
+        @current-change="onPageChange"
       />
     </div>
 
     <!-- 批量建机 -->
-    <el-dialog v-model="createDlg" title="批量创建云手机" width="440px">
+    <el-dialog v-model="createDlg" title="批量创建云手机" width="440px" :close-on-click-modal="!creating" :show-close="!creating" :close-on-press-escape="!creating">
       <el-form label-width="92px">
         <el-form-item label="数量"><el-input-number v-model="form.count" :min="1" :max="50" /></el-form-item>
         <el-form-item label="名称前缀"><el-input v-model="form.name_prefix" /></el-form-item>
@@ -399,7 +414,7 @@ const statusText = { running: '运行中', stopped: '已停止', creating: '创�
         <el-form-item label="创建后启动"><el-switch v-model="form.auto_start" /></el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="createDlg = false">取消</el-button>
+        <el-button :disabled="creating" @click="createDlg = false">取消</el-button>
         <el-button type="primary" :loading="creating" @click="batchCreate">开始创建</el-button>
       </template>
     </el-dialog>

@@ -44,16 +44,17 @@ async function load() {
   }
 }
 
-// KPI 磁贴
+// KPI 磁贴（统一由 kpis 计算属性渲染，模板 v-for 复用）
 const kpis = computed(() => {
   const o = overview.value
+  const onlineRate = o.total_devices ? Math.round((o.running / o.total_devices) * 100) : 0
   return [
-    { key: 'total', label: '总设备', value: o.total_devices, color: '#007aff', icon: 'Iphone' },
-    { key: 'running', label: '运行中', value: o.running, color: STATUS_META.running.color, icon: 'VideoPlay' },
-    { key: 'stopped', label: '已停止', value: o.stopped, color: STATUS_META.stopped.color, icon: 'VideoPause' },
-    { key: 'error', label: '异常', value: o.error, color: STATUS_META.error.color, icon: 'WarningFilled' },
-    { key: 'groups', label: '分组数', value: o.total_groups, color: '#5856d6', icon: 'FolderOpened' },
-    { key: 'ws', label: '在线 WS 客户端', value: o.ws_clients, color: '#ff9f0a', icon: 'Connection' },
+    { label: '设备总数', value: o.total_devices, color: 'var(--brand)', bg: 'var(--brand-bg)', icon: 'Iphone', sub: '全部云手机' },
+    { label: '运行中', value: o.running, color: 'var(--success)', bg: '#dcfce7', icon: 'VideoPlay', sub: `在线率 ${onlineRate}%`, subColor: 'var(--success)' },
+    { label: '已停止', value: o.stopped, color: 'var(--info)', bg: '#f1f5f9', icon: 'VideoPause', sub: '离线设备' },
+    { label: '异常', value: o.error, color: 'var(--danger)', bg: '#fee2e2', icon: 'WarningFilled', sub: `${o.error} 条异常`, subColor: 'var(--danger)' },
+    { label: '分组数', value: o.total_groups, color: 'var(--brand)', bg: 'var(--brand-bg)', icon: 'FolderOpened', sub: '设备分组' },
+    { label: '在线 WS 客户端', value: o.ws_clients, color: 'var(--warning)', bg: '#fef3c7', icon: 'Connection', sub: '实时连接' },
   ]
 })
 
@@ -61,14 +62,17 @@ const kpis = computed(() => {
 const statusSegments = computed(() => {
   const o = overview.value
   const total = o.total_devices || 0
-  return ['running', 'stopped', 'creating', 'error']
-    .map((k) => ({
-      key: k,
-      label: STATUS_META[k].label,
-      color: STATUS_META[k].color,
-      count: o[k] || 0,
-      pct: total ? ((o[k] || 0) / total) * 100 : 0,
-    }))
+  const max = Math.max(1, o.running || 0, o.stopped || 0, o.creating || 0, o.error || 0)
+  const short = { running: '在线', stopped: '离线', creating: '维护', error: '告警' }
+  return ['running', 'stopped', 'creating', 'error'].map((k) => ({
+    key: k,
+    label: STATUS_META[k].label,
+    short: short[k],
+    color: STATUS_META[k].color,
+    count: o[k] || 0,
+    pct: total ? ((o[k] || 0) / total) * 100 : 0,
+    height: o[k] ? Math.max(15, Math.round((o[k] / max) * 100)) : 0,
+  }))
 })
 
 const maxModel = computed(() =>
@@ -110,82 +114,23 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- 4 Stat Cards -->
-    <el-row :gutter="16" class="stat-row">
-      <el-col :xs="12" :sm="6">
-        <div class="stat-card">
-          <div class="stat-icon" style="background: var(--brand-bg); color: var(--brand)">
-            <el-icon :size="22"><Iphone /></el-icon>
-          </div>
-          <div class="stat-body">
-            <div class="stat-value">{{ overview.total_devices }}</div>
-            <div class="stat-label">设备总数</div>
-          </div>
+    <!-- KPI 磁贴 -->
+    <div class="kpi-grid">
+      <div v-for="k in kpis" :key="k.label" class="stat-card">
+        <div class="stat-icon" :style="{ background: k.bg, color: k.color }">
+          <el-icon :size="22"><component :is="k.icon" /></el-icon>
         </div>
-      </el-col>
-      <el-col :xs="12" :sm="6">
-        <div class="stat-card">
-          <div class="stat-icon" style="background: #dcfce7; color: var(--success)">
-            <el-icon :size="22"><VideoPlay /></el-icon>
-          </div>
-          <div class="stat-body">
-            <div class="stat-value">{{ overview.running }}</div>
-            <div class="stat-label">在线</div>
-            <div class="stat-sub" style="color: var(--success)">在线率 {{ overview.total_devices ? ((overview.running / overview.total_devices) * 100).toFixed(0) : 0 }}%</div>
-          </div>
+        <div class="stat-body">
+          <div class="stat-value">{{ k.value }}</div>
+          <div class="stat-label">{{ k.label }}</div>
+          <div class="stat-sub" v-if="k.sub" :style="{ color: k.subColor || 'var(--text-muted)' }">{{ k.sub }}</div>
         </div>
-      </el-col>
-      <el-col :xs="12" :sm="6">
-        <div class="stat-card">
-          <div class="stat-icon" style="background: #fef3c7; color: var(--warning)">
-            <el-icon :size="22"><VideoPause /></el-icon>
-          </div>
-          <div class="stat-body">
-            <div class="stat-value">{{ overview.stopped }}</div>
-            <div class="stat-label">离线</div>
-            <div class="stat-sub">离线设备</div>
-          </div>
-        </div>
-      </el-col>
-      <el-col :xs="12" :sm="6">
-        <div class="stat-card">
-          <div class="stat-icon" style="background: #fee2e2; color: var(--danger)">
-            <el-icon :size="22"><WarningFilled /></el-icon>
-          </div>
-          <div class="stat-body">
-            <div class="stat-value">{{ overview.error }}</div>
-            <div class="stat-label">告警</div>
-            <div class="stat-sub" style="color: var(--danger)">{{ overview.error }}条异常</div>
-          </div>
-        </div>
-      </el-col>
-      <el-col :xs="12" :sm="6">
-        <div class="stat-card">
-          <div class="stat-icon" style="background: var(--brand-bg); color: var(--brand)">
-            <el-icon :size="22"><FolderOpened /></el-icon>
-          </div>
-          <div class="stat-body">
-            <div class="stat-value">{{ overview.total_groups }}</div>
-            <div class="stat-label">分组数</div>
-          </div>
-        </div>
-      </el-col>
-      <el-col :xs="12" :sm="6">
-        <div class="stat-card">
-          <div class="stat-icon" style="background: #fef3c7; color: var(--warning)">
-            <el-icon :size="22"><Connection /></el-icon>
-          </div>
-          <div class="stat-body">
-            <div class="stat-value">{{ overview.ws_clients }}</div>
-            <div class="stat-label">在线WS客户端</div>
-          </div>
-        </div>
-      </el-col>
-    </el-row>
+      </div>
+    </div>
 
-    <!-- 3 Visualization Modules -->
-    <el-row :gutter="16" class="block">
-      <!-- Status Distribution Bar Chart -->
+    <!-- 可视化模块：状态分布 + 机型排行 + 分组排行 -->
+    <el-row :gutter="16" class="charts-row">
+      <!-- 状态分布 -->
       <el-col :xs="24" :md="8">
         <el-card shadow="never" class="chart-card">
           <div class="block-head">
@@ -195,19 +140,9 @@ onBeforeUnmount(() => {
             <div class="bar-item" v-for="s in statusSegments" :key="s.key">
               <div class="bar-wrap">
                 <span class="bar-val">{{ s.count }}</span>
-                <div
-                  class="bar-col"
-                  :style="{
-                    height: s.count > 0
-                      ? Math.max(15, Math.round(s.count / Math.max(overview.running || 0, overview.stopped || 0, overview.creating || 0, overview.error || 0, 1) * 100)) + '%'
-                      : '0%',
-                    background: s.color,
-                  }"
-                ></div>
+                <div class="bar-col" :style="{ height: s.height + '%', background: s.color }"></div>
               </div>
-              <div class="bar-label">{{
-                s.key === 'running' ? '在线' : s.key === 'stopped' ? '离线' : s.key === 'creating' ? '维护' : '告警'
-              }}</div>
+              <div class="bar-label">{{ s.short }}</div>
               <div class="bar-pct">{{ s.pct.toFixed(0) }}%</div>
             </div>
           </div>
@@ -255,20 +190,21 @@ onBeforeUnmount(() => {
       </el-col>
     </el-row>
 
-    <!-- Recent Active Devices Table -->
+    <!-- 最近活跃设备 -->
     <el-card shadow="never" class="block">
       <div class="block-head">
         <span class="block-title">最近活跃设备</span>
+        <span class="device-total">共 {{ overview.recent_devices.length }} 台</span>
       </div>
       <el-table :data="overview.recent_devices" size="small" style="width: 100%">
-        <el-table-column prop="name" label="设备名称" min-width="140" />
-        <el-table-column label="型号" min-width="120">
+        <el-table-column prop="name" label="设备名称" min-width="160" />
+        <!-- <el-table-column label="型号" min-width="120">
           <template #default="{ row }">{{ row.model || '—' }}</template>
         </el-table-column>
         <el-table-column label="分组" min-width="120">
           <template #default="{ row }">{{ row.group_name || '—' }}</template>
-        </el-table-column>
-        <el-table-column label="状态" width="100">
+        </el-table-column> -->
+        <el-table-column label="状态" width="140">
           <template #default="{ row }">
             <el-tag :type="statusTagType[row.status]" size="small">{{ statusText[row.status] }}</el-tag>
           </template>
@@ -288,23 +224,27 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
-/* Stat cards row */
-.stat-row {
+/* ===== KPI 磁贴（自动填充，永不失衡） ===== */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
   margin-bottom: 16px;
 }
 .stat-card {
   background: #fff;
   border: 1px solid var(--card-border);
   border-radius: var(--radius);
+  box-shadow: var(--shadow);
   padding: 20px;
   display: flex;
   align-items: center;
   gap: 14px;
-  transition: box-shadow 0.2s;
-  height: 100%;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
 }
 .stat-card:hover {
   box-shadow: var(--shadow-lg);
+  transform: translateY(-2px);
 }
 .stat-icon {
   width: 48px;
@@ -314,6 +254,10 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+.stat-card:hover .stat-icon {
+  transform: scale(1.08);
 }
 .stat-body {
   min-width: 0;
@@ -333,21 +277,38 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: var(--text-muted);
   margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* Chart cards */
-.block {
+/* ===== 可视化卡片（三卡等高，底部对齐） ===== */
+.charts-row {
+  align-items: stretch;
   margin-bottom: 16px;
 }
+.charts-row :deep(.el-col) {
+  display: flex;
+}
 .chart-card {
+  flex: 1;
+  width: 100%;
   border-radius: var(--radius);
-  height: 100%;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+}
+.chart-card :deep(.el-card__body) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 .block-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 16px;
+  flex-shrink: 0;
 }
 .block-title {
   font-weight: 600;
@@ -366,12 +327,13 @@ onBeforeUnmount(() => {
   font-weight: 500;
 }
 
-/* Bar chart */
+/* ===== 状态分布柱状图（随卡片等高伸缩） ===== */
 .bar-chart {
+  flex: 1;
+  min-height: 180px;
   display: flex;
   align-items: flex-end;
   justify-content: space-around;
-  height: 180px;
   padding: 10px 8px 0;
 }
 .bar-item {
@@ -413,7 +375,7 @@ onBeforeUnmount(() => {
   margin-top: 2px;
 }
 
-/* Rank badges */
+/* ===== 排行徽标 ===== */
 .rank-badge {
   width: 20px;
   height: 20px;
@@ -437,11 +399,30 @@ onBeforeUnmount(() => {
   background: #a5b4fc;
 }
 
-/* Empty hint */
+/* ===== 空状态 ===== */
 .empty-hint {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   text-align: center;
   color: var(--text-muted);
   font-size: 13px;
-  padding: 40px 0;
+  padding: 32px 0;
+}
+
+/* ===== 最近活跃表 ===== */
+.block {
+  margin-bottom: 16px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.device-total {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.dashboard :deep(.el-table) {
+  border-radius: var(--radius-sm);
+  overflow: hidden;
 }
 </style>

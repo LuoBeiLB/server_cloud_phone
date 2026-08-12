@@ -17,21 +17,41 @@ const deviceId = ref(null)
 const lines = ref(200)
 const logLines = ref([])
 const loading = ref(false)
+const searching = ref(false)
 const autoRefresh = ref(false)
 const lastUpdated = ref(null)
 const logBox = ref(null)
 let timer = null
+let searchTimer = null
 
 const currentDevice = computed(() => devices.value.find((d) => d.id === deviceId.value) || null)
 
-async function loadDevices() {
+// 全量设备缓存：默认查询一次，之后打开下拉直接使用缓存，避免重复请求
+let allDevices = []
+// 设备下拉：默认一次性拉取全部设备；输入关键字时远程搜索匹配的前 10 条
+async function loadDevices(q) {
+  const kw = String(q || '').trim()
+  searching.value = true
   try {
-    const { data } = await http.get('/devices')
-    devices.value = data
-    if (!deviceId.value && data.length) deviceId.value = data[0].id
+    if (kw) {
+      const { data } = await http.get('/devices', { params: { q: kw, page: 1, page_size: 10 } })
+      devices.value = data?.items || []
+    } else {
+      if (!allDevices.length) {
+        const { data } = await http.get('/devices', { params: { page: 1, page_size: 100 } })
+        allDevices = data?.items || []
+      }
+      devices.value = allDevices
+    }
   } catch (e) {
     ElMessage.error('设备列表获取失败')
+  } finally {
+    searching.value = false
   }
+}
+function searchDevices(q) {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => loadDevices(q), 300)
 }
 
 async function loadLogs() {
@@ -79,12 +99,12 @@ function fmtTime(d) {
   return d ? d.toLocaleTimeString('zh-CN', { hour12: false }) : '—'
 }
 
-onMounted(async () => {
-  await loadDevices()
-  await loadLogs()
+onMounted(() => {
+  loadDevices() // 默认查询一次全部设备，下拉打开即有数据
 })
 onBeforeUnmount(() => {
   if (timer) clearInterval(timer)
+  if (searchTimer) clearTimeout(searchTimer)
 })
 </script>
 
@@ -100,7 +120,16 @@ onBeforeUnmount(() => {
 
     <div class="toolbar">
       <span class="muted">设备</span>
-      <el-select v-model="deviceId" placeholder="选择设备" size="small" style="width: 200px" filterable>
+      <el-select
+        v-model="deviceId"
+        placeholder="选择设备"
+        size="small"
+        style="width: 200px"
+        filterable
+        remote
+        :loading="searching"
+        :remote-method="searchDevices"
+      >
         <el-option v-for="d in devices" :key="d.id" :label="`${d.name} (#${d.id})`" :value="d.id">
           <span>{{ d.name }}</span>
           <el-tag :type="statusMeta(d.status).tag" size="small" effect="plain" style="margin-left: 8px">

@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, onBeforeUnmount, ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { api } from '../api/client'
 import { useDevices } from '../stores/devices'
 import PhoneFrame from '../components/PhoneFrame.vue'
 
@@ -12,21 +13,41 @@ const groupId = ref('')
 // 网格列数：自定义输入可能被清空成 null，渲染时兜底到合法范围
 const gridN = computed(() => Math.max(1, Math.min(8, Number(cols.value) || 1)))
 
-const shown = computed(() => {
-  let list = store.list
-  if (groupId.value) list = list.filter((d) => d.group_id === groupId.value)
-  return list
-})
-
-function resubscribe() {
-  store.subscribePreviews(shown.value.map((d) => d.id), 1)
+// 设备列表：服务端分页懒加载（翻页/切分组才请求，不一次全量）
+const devices = ref([])
+const total = ref(0)
+const page = ref(1)
+const pageSize = ref(16)
+async function loadDevices() {
+  try {
+    const params = { page: page.value, page_size: pageSize.value }
+    if (groupId.value) params.group_id = groupId.value
+    const { data } = await api.listDevices(params)
+    devices.value = data?.items || []
+    total.value = data?.total || 0
+  } catch {
+    devices.value = []
+    total.value = 0
+  }
 }
 
-watch(shown, resubscribe)
+function resubscribe() {
+  store.subscribePreviews(devices.value.map((d) => d.id), 1)
+}
+function onPageChange(p) {
+  page.value = p
+  loadDevices()
+}
+
+watch(devices, resubscribe)
 watch(cols, resubscribe)
+watch(groupId, () => {
+  page.value = 1
+  loadDevices()
+})
 
 onMounted(async () => {
-  await store.refresh()
+  await loadDevices()
   await store.refreshGroups()
   resubscribe()
 })
@@ -64,7 +85,7 @@ onBeforeUnmount(() => store.subscribePreviews([], 1))
     </div>
 
     <div class="grid" :style="{ gridTemplateColumns: `repeat(${gridN}, 1fr)` }">
-      <div class="preview-card" v-for="d in shown" :key="d.id">
+      <div class="preview-card" v-for="d in devices" :key="d.id">
         <div class="preview-status" :class="d.status">
           <span class="dot" :class="d.status"></span>
           {{ d.status === 'running' ? '在线' : d.status === 'error' ? '离线' : '忙碌' }}
@@ -81,7 +102,19 @@ onBeforeUnmount(() => store.subscribePreviews([], 1))
         </div>
       </div>
     </div>
-    <el-empty v-if="!shown.length" description="暂无设备，请先到「设备管理」批量建机" />
+    <div class="pagination-bar">
+      <span class="page-info">共 {{ total }} 台设备</span>
+      <el-pagination
+        :current-page="page"
+        :total="total"
+        :page-size="pageSize"
+        layout="prev, pager, next"
+        background
+        small
+        @current-change="onPageChange"
+      />
+    </div>
+    <el-empty v-if="!devices.length" description="暂无设备，请先到「设备管理」批量建机" />
   </div>
 </template>
 
@@ -144,6 +177,16 @@ onBeforeUnmount(() => store.subscribePreviews([], 1))
   font-size: 12px;
   flex-shrink: 0;
   margin-left: 8px;
+}
+.pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+}
+.page-info {
+  color: var(--text-secondary);
+  font-size: 13px;
 }
 :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) {
   background-color: var(--brand);
