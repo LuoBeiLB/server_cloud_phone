@@ -27,8 +27,16 @@ async function submit() {
 <template>
   <div class="login-wrap">
     <div class="login-card">
-      <div class="login-title">X86 云手机平台</div>
-      <div class="login-sub">网站登录及管理系统 · 类魔云腾</div>
+      <div class="login-head">
+        
+        <div>
+          <div class="login-title">X86 云手机平台</div>
+        <div class="login-sub">网站登录及管理系统 · 类魔云腾</div>
+        </div>
+        <div>
+<img src="/logo.png" class="login-logo" alt="logo" />
+        </div>
+      </div>
       <el-form @submit.prevent="submit">
         <el-form-item>
           <el-input v-model="username" placeholder="用户名" size="large" :prefix-icon="'User'" />

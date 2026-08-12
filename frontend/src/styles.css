@@ -57,9 +57,15 @@ body {
   height: 100%; display: flex; align-items: center; justify-content: center;
   background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #c026d3 100%);
 }
-.login-card { width: 380px; padding: 34px 30px; border-radius: 18px; background: #fff;
-  box-shadow: 0 20px 60px rgba(0,0,0,.25); }
-.login-title { font-size: 22px; font-weight: 700; margin: 0 0 6px; }
+.login-card {
+  width: 420px; padding: 36px 32px;
+  border-radius: 18px; background: #fff;
+  box-shadow: 0 20px 60px rgba(0,0,0,.25);
+}
+/* 头部：图标、标题、副标题纵向排列，整体靠右（右缘与表单对齐） */
+.login-head { display: flex; }
+.login-logo { width: 58px; height: 58px; object-fit: contain; margin-bottom: 2px; margin-left: 100px;border-radius: 12px; }
+.login-title { font-size: 22px; font-weight: 700; margin: 0 0 4px; }
 .login-sub { color: var(--text-secondary); font-size: 13px; margin-bottom: 22px; }
 
 /* ===== 手机预览卡 ===== */
