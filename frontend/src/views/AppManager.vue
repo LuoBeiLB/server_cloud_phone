@@ -102,13 +102,23 @@ function onBatchSelect(rows) {
 const deviceOptions = ref([])
 const searchingDevices = ref(false)
 let deviceSearchTimer = null
+// 全量设备缓存：默认查询一次，之后打开下拉直接使用缓存，避免重复请求
+let allDeviceOptions = []
 
 async function loadDeviceOptions(q) {
-  if (!q) return
+  const kw = String(q || '').trim()
   searchingDevices.value = true
   try {
-    const { data } = await api.listDevices({ q, page: 1, page_size: 10 })
-    deviceOptions.value = data?.items || []
+    if (kw) {
+      const { data } = await api.listDevices({ q: kw, page: 1, page_size: 10 })
+      deviceOptions.value = data?.items || []
+    } else {
+      if (!allDeviceOptions.length) {
+        const { data } = await api.listDevices({ page: 1, page_size: 100 })
+        allDeviceOptions = data?.items || []
+      }
+      deviceOptions.value = allDeviceOptions
+    }
   } catch {
     deviceOptions.value = []
   } finally {
@@ -199,7 +209,7 @@ const statusType = { running: 'success', stopped: 'info', creating: 'warning', e
 
 onMounted(async () => {
   await loadBatchDevices()
-  // 单机下拉默认为空：不预选任何设备，由用户搜索选择后再加载应用
+  loadDeviceOptions() // 默认查询一次全部设备，下拉打开即有数据
 })
 </script>
 

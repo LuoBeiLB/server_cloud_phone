@@ -75,13 +75,23 @@ function joinPath(dir, name) {
   return dir.replace(/\/+$/, '') + '/' + name
 }
 
-// 设备下拉：远程查询筛选。默认不查询任何数据，输入关键字才请求匹配的 10 条
+// 全量设备缓存：默认查询一次，之后打开下拉直接使用缓存，避免重复请求
+let allDevices = []
+// 设备下拉：默认一次性拉取全部设备；输入关键字时远程搜索匹配的前 10 条
 async function loadDevices(q) {
-  if (!q) return
+  const kw = String(q || '').trim()
   searching.value = true
   try {
-    const { data } = await api.listDevices({ q, page: 1, page_size: 10 })
-    devices.value = data?.items || []
+    if (kw) {
+      const { data } = await api.listDevices({ q: kw, page: 1, page_size: 10 })
+      devices.value = data?.items || []
+    } else {
+      if (!allDevices.length) {
+        const { data } = await api.listDevices({ page: 1, page_size: 100 })
+        allDevices = data?.items || []
+      }
+      devices.value = allDevices
+    }
   } catch {
     ElMessage.error('设备列表获取失败')
   } finally {
@@ -215,7 +225,7 @@ function newFolder() {
 }
 
 onMounted(() => {
-  // 设备下拉默认不查询任何数据，由用户搜索选择设备后加载文件
+  loadDevices() // 默认查询一次全部设备，下拉打开即有数据
 })
 </script>
 

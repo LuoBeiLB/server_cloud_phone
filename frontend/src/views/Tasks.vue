@@ -176,14 +176,22 @@ const deviceName = (id) => store.byId(id)?.name || `#${id}`
 const devices = ref([])
 const searching = ref(false)
 let searchTimer = null
+// 全量设备缓存：默认查询一次，之后打开下拉直接使用缓存，避免重复请求
+let allDevices = []
 async function loadDevices(q) {
-  if (!q) return
+  const kw = String(q || '').trim()
   searching.value = true
   try {
-    const { data } = await http.get('/devices', {
-      params: { q, page: 1, page_size: 10 },
-    })
-    devices.value = data?.items || []
+    if (kw) {
+      const { data } = await http.get('/devices', { params: { q: kw, page: 1, page_size: 10 } })
+      devices.value = data?.items || []
+    } else {
+      if (!allDevices.length) {
+        const { data } = await http.get('/devices', { params: { page: 1, page_size: 100 } })
+        allDevices = data?.items || []
+      }
+      devices.value = allDevices
+    }
   } catch {
     devices.value = []
   } finally {
@@ -198,6 +206,7 @@ function searchDevices(q) {
 onMounted(async () => {
   await store.refresh()
   await load()
+  loadDevices() // 默认查询一次全部设备，任务选择器下拉打开即有数据
   timer = setInterval(load, 5000)
 })
 onBeforeUnmount(() => {

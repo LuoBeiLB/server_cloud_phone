@@ -19,12 +19,22 @@ const running = ref(false)
 const devices = ref([])
 const searching = ref(false)
 let searchTimer = null
+// 全量设备缓存：默认查询一次，之后打开下拉直接使用缓存，避免重复请求
+let allDevices = []
 async function loadDevices(q) {
-  if (!q) return
+  const kw = String(q || '').trim()
   searching.value = true
   try {
-    const { data } = await api.listDevices({ q, page: 1, page_size: 10 })
-    devices.value = data?.items || []
+    if (kw) {
+      const { data } = await api.listDevices({ q: kw, page: 1, page_size: 10 })
+      devices.value = data?.items || []
+    } else {
+      if (!allDevices.length) {
+        const { data } = await api.listDevices({ page: 1, page_size: 100 })
+        allDevices = data?.items || []
+      }
+      devices.value = allDevices
+    }
   } catch {
     devices.value = []
   } finally {
@@ -121,6 +131,7 @@ async function load() {
 onMounted(async () => {
   await store.refresh()
   await load()
+  loadDevices() // 默认查询一次全部设备，回放选择器下拉打开即有数据
 })
 
 // ---------- 新建 / 编辑 ----------

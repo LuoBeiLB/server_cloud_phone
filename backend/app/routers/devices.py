@@ -53,15 +53,15 @@ async def list_devices(
         from sqlalchemy import cast, String
 
         kw = f"%{q}%"
-        # fingerprint 是 JSON 列：用 json_extract 取嵌套字段再转文本模糊匹配。
-        # 注意不能用 `.astext`（那是 Postgres JSONB 专属，SQLite 会 AttributeError）。
+        # fingerprint 是 JSON 列。**不能**用 func.json_extract —— 那是 SQLite(JSON1) 专属，
+        # Postgres 没有该函数，搜索会 UndefinedFunctionError → 500（线上真实事故）。
+        # 也不能用 `.astext`（Postgres JSONB 专属，SQLite 会 AttributeError）。
+        # 通用做法：整列 cast 成字符串后模糊匹配，两种库都原生支持，
+        # 一并覆盖模型/序列号/Android ID/出口 IP 等所有嵌套字段。
         stmt = stmt.where(
             or_(
                 Device.name.ilike(kw),
-                cast(func.json_extract(Device.fingerprint, "$.device.model"), String).ilike(kw),
-                cast(func.json_extract(Device.fingerprint, "$.device.serialno"), String).ilike(kw),
-                cast(func.json_extract(Device.fingerprint, "$.device.android_id"), String).ilike(kw),
-                cast(func.json_extract(Device.fingerprint, "$.network.exit_ip"), String).ilike(kw),
+                cast(Device.fingerprint, String).ilike(kw),
                 Device.current_url.ilike(kw),
             )
         )
