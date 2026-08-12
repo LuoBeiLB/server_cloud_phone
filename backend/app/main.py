@@ -45,12 +45,19 @@ async def lifespan(app: FastAPI):
     import asyncio
 
     from .routers.tasks import scheduler_loop
+    from .pool import pool
+    from .database import SessionLocal
 
     await init_db()
     await seed()
     # 启动定时任务调度器（后台协程）
     asyncio.create_task(scheduler_loop())
+    # 初始化设备预热池（仅 redroid 后端启用）
+    if settings.device_backend == "redroid":
+        asyncio.create_task(pool.init(SessionLocal))
     yield
+    # 清理预热池
+    await pool.shutdown()
 
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
