@@ -16,7 +16,7 @@ cd "$WSDIR"
 [ -d dist ] || npm run dist
 
 # 确保 redroid 设备已 adb 纳管（redroid 容器 5555 映射到宿主 5556..）
-for p in $(seq 5556 5575); do adb connect "localhost:$p" >/dev/null 2>&1 || true; done
+for p in $(docker ps --filter "name=redroid_" --format "{{.Ports}}" | grep -oP ":\K\d+(?=->5555)" | sort -un); do adb connect "localhost:$p" >/dev/null 2>&1 || true; done
 adb devices | grep 555 || echo "（未见 adb 设备，先确认 redroid 容器在跑）"
 
 echo "==> ws-scrcpy 监听 :$PORT —— 浏览器打开后选设备即可 H.264 投屏"
