@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, markHandled } from '../api/client'
+import { socket as ws } from '../api/ws'
 import { useDevices } from '../stores/devices'
 import PhoneFrame from '../components/PhoneFrame.vue'
 
@@ -13,6 +14,41 @@ const id = computed(() => Number(route.params.id))
 const device = computed(() => store.byId(id.value))
 const url = ref('')
 const textInput = ref('')
+
+// 键盘实时输入
+const kbEnabled = ref(false)
+let _kbBuf = ''
+let _kbTimer = null
+const KEY_EVENTS = new Set(['Enter','Backspace','Delete','Tab','Escape','ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '])
+function flushBuffer() {
+  if (_kbBuf) {
+    ws.send({ type: 'input_text', device_id: id.value, text: _kbBuf })
+    _kbBuf = ''
+  }
+  if (_kbTimer) { clearTimeout(_kbTimer); _kbTimer = null }
+}
+function onKeyDown(e) {
+  if (!kbEnabled.value) return
+  if (KEY_EVENTS.has(e.key)) {
+    flushBuffer()
+    e.preventDefault()
+    const map = { Enter:'enter', Backspace:'backspace', Delete:'delete', Tab:'tab', Escape:'escape', ArrowUp:'arrow_up', ArrowDown:'arrow_down', ArrowLeft:'arrow_left', ArrowRight:'arrow_right', ' ':'space' }
+    ws.send({ type: 'key_event', device_id: id.value, key: map[e.key] || e.key.toLowerCase() })
+    return
+  }
+  if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    e.preventDefault()
+    _kbBuf += e.key
+    if (_kbTimer) clearTimeout(_kbTimer)
+    _kbTimer = setTimeout(flushBuffer, 100)
+  }
+}
+watch(kbEnabled, (val) => {
+  if (val) {
+    _kbBuf = ''
+    if (_kbTimer) { clearTimeout(_kbTimer); _kbTimer = null }
+  }
+})
 
 // 脚本录制
 const recording = ref(false)
@@ -270,7 +306,7 @@ async function saveScript() {
 </script>
 
 <template>
-  <div class="page" v-if="device">
+  <div class="page" v-if="device" tabindex="0" @keydown="onKeyDown">
     <div class="toolbar">
       <el-button :icon="'ArrowLeft'" @click="router.push('/devices')">返回</el-button>
       <span style="font-weight: 600">{{ device.name }}</span>

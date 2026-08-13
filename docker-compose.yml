@@ -106,6 +106,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # 实例数据目录，与 CLOUD_REDROID_DATA_DIR 对齐（便于在后端容器内排查实例数据）
       - /data/redroid:/data/redroid
+      #修复换肤功能
+      - /home/zzz/cloud/backend/app/skins:/app/app/skins
     # 说明：这里**刻意不用 network_mode: host**。host 网络下的 backend 不在 compose
     # 的桥接网上，前端 nginx 的 proxy_pass backend:8000 会解析不到，整个栈会断。
     # 改由 CLOUD_REDROID_ADB_MODE=container，后端经容器名 adb connect redroid_<id>:5555。

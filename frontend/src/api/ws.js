@@ -71,6 +71,12 @@ export class DeviceSocket {
     }
   }
 
+  send(obj) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(obj))
+    }
+  }
+
   close() {
     if (this.ws) {
       this.ws.onclose = null

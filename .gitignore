@@ -21,6 +21,7 @@ pc-client/dist/
 app-client/**/build/
 app-client/**/.gradle/
 *.apk
+!backend/app/skins/ADBKeyboard.apk
 
 # OS / editor
 .DS_Store
