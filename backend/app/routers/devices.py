@@ -103,31 +103,13 @@ async def create_device(body: DeviceCreate, db: AsyncSession = Depends(get_db)) 
 
 @router.post("/batch", response_model=list[DeviceOut])
 async def batch_create(body: DeviceBatchCreate, db: AsyncSession = Depends(get_db)) -> list[Device]:
-    """一键创建/启动 N 台云手机。优先从预热池分配，池空走异步创建+后台并发启动。"""
-    from ..pool import pool
+    """一键创建/启动 N 台云手机。异步创建+后台并发启动。"""
 
     base = len((await db.execute(select(Device.id))).all())
     devices: list[Device] = []
 
     for i in range(1, body.count + 1):
         name = f"{body.name_prefix}-{base + i:03d}"
-
-        # 优先从预热池取已启动的设备
-        pooled = await pool.acquire()
-        if pooled is not None:
-            pooled_in_db = await db.get(Device, pooled.id)
-            if pooled_in_db is not None:
-                pooled_in_db.name = name
-                pooled_in_db.group_id = body.group_id
-                if body.target_url:
-                    pooled_in_db.current_url = body.target_url
-                await db.commit()
-                await db.refresh(pooled_in_db)
-                await services.broadcast_device(pooled_in_db)
-                devices.append(pooled_in_db)
-                continue
-
-        # 池子空了，走异步创建（不自动启动，后台并发启动）
         device = await services.create_device(
             db,
             name=name,
@@ -140,15 +122,14 @@ async def batch_create(body: DeviceBatchCreate, db: AsyncSession = Depends(get_d
         )
         devices.append(device)
 
-    # 后台并发启动非池子的设备（池子设备已经是 running）
-    non_pooled = [d for d in devices if d.status != DeviceStatus.running]
-    if non_pooled:
+    # 后台并发启动
+    if devices:
         from ..database import SessionLocal
 
         asyncio.create_task(
             services.start_devices_concurrent(
                 db_factory=SessionLocal,
-                devices=non_pooled,
+                devices=devices,
                 max_concurrent=5,
                 target_url=body.target_url,
             )
