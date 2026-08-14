@@ -240,6 +240,9 @@ function onKbdKeydown(e) {
 
 watch(kbdSync, (on) => {
   if (on) {
+    // === 物理键盘修复：打开开关时主动发一个零宽空格触发后端 _ensure_adbkeyboard 预热 ===
+    // 这样第一次敲键时 IME 已经 ready（装好+设为默认），字符就能进手机
+    ctl('text', { text: '\u200b' }, { record: false }).catch(() => {})
     window.addEventListener('keydown', onKbdKeydown)
     ElMessage.success('键盘已连接：直接打字即输入到手机（中文请用右侧文本框整段发送）')
   } else {
