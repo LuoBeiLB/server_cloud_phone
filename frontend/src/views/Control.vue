@@ -15,41 +15,6 @@ const device = computed(() => store.byId(id.value))
 const url = ref('')
 const textInput = ref('')
 
-// 键盘实时输入
-const kbEnabled = ref(false)
-let _kbBuf = ''
-let _kbTimer = null
-const KEY_EVENTS = new Set(['Enter','Backspace','Delete','Tab','Escape','ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '])
-function flushBuffer() {
-  if (_kbBuf) {
-    ws.send({ type: 'input_text', device_id: id.value, text: _kbBuf })
-    _kbBuf = ''
-  }
-  if (_kbTimer) { clearTimeout(_kbTimer); _kbTimer = null }
-}
-function onKeyDown(e) {
-  if (!kbEnabled.value) return
-  if (KEY_EVENTS.has(e.key)) {
-    flushBuffer()
-    e.preventDefault()
-    const map = { Enter:'enter', Backspace:'backspace', Delete:'delete', Tab:'tab', Escape:'escape', ArrowUp:'arrow_up', ArrowDown:'arrow_down', ArrowLeft:'arrow_left', ArrowRight:'arrow_right', ' ':'space' }
-    ws.send({ type: 'key_event', device_id: id.value, key: map[e.key] || e.key.toLowerCase() })
-    return
-  }
-  if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
-    e.preventDefault()
-    _kbBuf += e.key
-    if (_kbTimer) clearTimeout(_kbTimer)
-    _kbTimer = setTimeout(flushBuffer, 100)
-  }
-}
-watch(kbEnabled, (val) => {
-  if (val) {
-    _kbBuf = ''
-    if (_kbTimer) { clearTimeout(_kbTimer); _kbTimer = null }
-  }
-})
-
 // 脚本录制
 const recording = ref(false)
 const steps = ref([])
@@ -242,7 +207,7 @@ watch(kbdSync, (on) => {
   if (on) {
     // === 物理键盘修复：打开开关时主动发一个零宽空格触发后端 _ensure_adbkeyboard 预热 ===
     // 这样第一次敲键时 IME 已经 ready（装好+设为默认），字符就能进手机
-    ctl('text', { text: '\u200b' }, { record: false }).catch(() => {})
+    ctl('text', { text: '​' }, { record: false }).catch(() => {})
     window.addEventListener('keydown', onKbdKeydown)
     ElMessage.success('键盘已连接：直接打字即输入到手机（中文请用右侧文本框整段发送）')
   } else {
@@ -284,6 +249,24 @@ async function sendText() {
   // 只有发送成功才清空输入框，失败时保留内容让用户可以重试
   if (await ctl('text', { text: textInput.value })) textInput.value = ''
 }
+
+// 截图下载：调后端 screencap 取当前画面，存为 PNG 到本地
+async function takeScreenshot() {
+  try {
+    const { data } = await api.screenshot(id.value)
+    const frame = data.frame
+    if (!frame) return ElMessage.warning('未取到画面')
+    const src = frame.startsWith('data:') ? frame : `data:image/png;base64,${frame}`
+    const a = document.createElement('a')
+    a.href = src
+    a.download = `${device.value?.name || 'device'}_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.png`
+    a.click()
+    ElMessage.success('截图已下载')
+  } catch (e) {
+    ElMessage.error(`截图失败：${e.friendly || e.message || '未知错误'}`)
+  }
+}
+
 async function saveScript() {
   if (!steps.value.length) return ElMessage.warning('还没有录到操作')
   let value
@@ -309,7 +292,7 @@ async function saveScript() {
 </script>
 
 <template>
-  <div class="page" v-if="device" tabindex="0" @keydown="onKeyDown">
+  <div class="page" v-if="device" tabindex="0">
     <div class="toolbar">
       <el-button :icon="'ArrowLeft'" @click="router.push('/devices')">返回</el-button>
       <span style="font-weight: 600">{{ device.name }}</span>
@@ -367,11 +350,43 @@ async function saveScript() {
             @tap="onTap"
             @swipe="onSwipe"
           />
+          <!-- 投屏功能工具条：ws-scrcpy 自带工具栏已在构建时隐藏，功能挪到框外 -->
+          <div v-if="embedStream" class="embed-actions">
+            <el-tooltip content="电源" placement="top">
+              <el-button circle :icon="'SwitchButton'" @click="key('power')" />
+            </el-tooltip>
+            <el-tooltip content="音量+" placement="top">
+              <el-button circle :icon="'Plus'" @click="key('volume_up')" />
+            </el-tooltip>
+            <el-tooltip content="音量-" placement="top">
+              <el-button circle :icon="'Minus'" @click="key('volume_down')" />
+            </el-tooltip>
+            <el-tooltip content="返回" placement="top">
+              <el-button circle :icon="'Back'" @click="key('back')" />
+            </el-tooltip>
+            <el-tooltip content="主页" placement="top">
+              <el-button circle :icon="'HomeFilled'" @click="key('home')" />
+            </el-tooltip>
+            <el-tooltip content="最近任务" placement="top">
+              <el-button circle :icon="'Files'" @click="key('recent')" />
+            </el-tooltip>
+            <el-tooltip content="截图" placement="top">
+              <el-button circle :icon="'Camera'" @click="takeScreenshot" />
+            </el-tooltip>
+            <el-tooltip :content="kbdSync ? '键盘同步：已开启' : '键盘同步：已关闭'" placement="top">
+              <el-button
+                circle
+                :type="kbdSync ? 'success' : 'default'"
+                :icon="'Grid'"
+                @click="kbdSync = !kbdSync"
+              />
+            </el-tooltip>
+          </div>
         </div>
         <div class="phone-hint">
           {{ embedStream ? '投屏画面内直接点按/拖动即可操控' : '点击画面 = 点按；按住拖动 = 滑动（实时映射设备坐标）' }}
         </div>
-        <!-- 物理键盘同步开关：开启后电脑键盘直接输入到手机 -->
+        <!-- 键盘同步：常驻开关（非投屏时显示；投屏时用工具条里的键盘圆钮） -->
         <div v-if="!embedStream" class="kbd-sync" :class="{ on: kbdSync }">
           <el-switch v-model="kbdSync" active-text="键盘同步" style="width: 40%;" />
           <span class="kbd-tip" style="width: 60%">
@@ -382,6 +397,7 @@ async function saveScript() {
             }}
           </span>
         </div>
+
       </div>
 
       <!-- ===== 右：操控面板 ===== -->
@@ -443,6 +459,7 @@ async function saveScript() {
       </div>
     </div>
   </div>
+
 </template>
 
 <style scoped>
@@ -484,13 +501,30 @@ async function saveScript() {
   border-radius: 22px;
   overflow: hidden;
   border: 3px solid #1d1d1f;
+  position: relative;
 }
 .embed-iframe {
+  /* ws-scrcpy 构建时已通过 deploy/scrcpy/setup-ws-scrcpy.sh 的补丁隐藏
+     自带工具栏并令视频铺满容器，iframe 直接 100%，无需外部裁剪 */
   width: 100%;
   height: 100%;
   border: 0;
   display: block;
 }
+
+/* ---- 投屏功能工具条：框外横排，替代 ws-scrcpy 自带工具栏 ---- */
+.embed-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+.embed-actions .el-button {
+  margin-left: 0;
+}
+
 .phone-hint {
   text-align: center;
   color: var(--text-muted);
