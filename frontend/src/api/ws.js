@@ -23,7 +23,8 @@ export class DeviceSocket {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
     this._state(this.retries ? 'connecting' : 'connecting')
     try {
-      this.ws = new WebSocket(`${proto}://${location.host}/api/ws`)
+      const token = localStorage.getItem('token') || ''
+      this.ws = new WebSocket(`${proto}://${location.host}/api/ws?token=${encodeURIComponent(token)}`)
     } catch (e) {
       this._state('closed', e.message || 'WebSocket 创建失败')
       clearTimeout(this._timer)

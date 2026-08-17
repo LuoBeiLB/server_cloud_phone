@@ -7,18 +7,21 @@ import PhoneFrame from '../components/PhoneFrame.vue'
 
 const store = useDevices()
 const router = useRouter()
-const cols = ref(3) // 2/3/4 -> 2x2 / 3x3 / 4x4，或自定义 n×n（1–8）
+// 顶部布局合并为「1×1 ~ 8×8」下拉选择器（替代原来的 6 个独立按钮 / radio-group）
+const gridN = ref(3)
 const groupId = ref('')
 
-// 网格列数：自定义输入可能被清空成 null，渲染时兜底到合法范围
-const gridN = computed(() => Math.max(1, Math.min(8, Number(cols.value) || 1)))
+// 网格下拉选项：1-8 共 8 档
+const gridOptions = Array.from({ length: 8 }, (_, i) => i + 1)
 
 // 设备列表：服务端分页懒加载（翻页/切分组才请求，不一次全量）
 const devices = ref([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(16)
+const loading = ref(false)
 async function loadDevices() {
+  loading.value = true
   try {
     const params = { page: page.value, page_size: pageSize.value }
     if (groupId.value) params.group_id = groupId.value
@@ -28,6 +31,8 @@ async function loadDevices() {
   } catch {
     devices.value = []
     total.value = 0
+  } finally {
+    loading.value = false
   }
 }
 
@@ -40,7 +45,7 @@ function onPageChange(p) {
 }
 
 watch(devices, resubscribe)
-watch(cols, resubscribe)
+watch(gridN, resubscribe)
 watch(groupId, () => {
   page.value = 1
   loadDevices()
@@ -59,23 +64,12 @@ onBeforeUnmount(() => store.subscribePreviews([], 1))
     <div class="page-header">
       <div class="page-title">多画面预览</div>
       <div class="page-header-right">
-        <el-radio-group v-model="cols">
-          <el-radio-button :value="2">2 × 2</el-radio-button>
-          <el-radio-button :value="3">3 × 3</el-radio-button>
-          <el-radio-button :value="4">4 × 4</el-radio-button>
-        </el-radio-group>
-
-        <div class="custom-grid">
-          <span class="muted">自定义</span>
-          <el-input-number
-            v-model="cols"
-            :min="1"
-            :max="8"
-            size="small"
-            controls-position="right"
-            style="width: 96px"
-          />
-          <span class="muted">{{ gridN }} × {{ gridN }}</span>
+        <!-- 顶部布局：1×1 ~ 8×8 一行下拉搞定（替代 6 个按钮 / 2x2/3x3/4x4 radio-group） -->
+        <div class="grid-picker">
+          <span class="muted">布局</span>
+          <el-select v-model="gridN" style="width: 110px">
+            <el-option v-for="n in gridOptions" :key="n" :label="`${n} × ${n}`" :value="n" />
+          </el-select>
         </div>
         <el-select v-model="groupId" placeholder="全部分组" clearable style="width: 150px">
           <el-option v-for="g in store.groups" :key="g.id" :label="g.name" :value="g.id" />
@@ -84,7 +78,7 @@ onBeforeUnmount(() => store.subscribePreviews([], 1))
       </div>
     </div>
 
-    <div class="grid" :style="{ gridTemplateColumns: `repeat(${gridN}, 1fr)` }">
+    <div v-loading="loading" element-loading-text="加载中..." class="grid" :style="{ gridTemplateColumns: `repeat(${gridN}, 1fr)` }">
       <div class="preview-card" v-for="d in devices" :key="d.id">
         <div class="preview-status" :class="d.status">
           <span class="dot" :class="d.status"></span>
@@ -119,7 +113,7 @@ onBeforeUnmount(() => store.subscribePreviews([], 1))
 </template>
 
 <style scoped>
-.custom-grid {
+.grid-picker {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -187,11 +181,5 @@ onBeforeUnmount(() => store.subscribePreviews([], 1))
 .page-info {
   color: var(--text-secondary);
   font-size: 13px;
-}
-:deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) {
-  background-color: var(--brand);
-  border-color: var(--brand);
-  color: #fff;
-  box-shadow: -1px 0 0 0 var(--brand);
 }
 </style>

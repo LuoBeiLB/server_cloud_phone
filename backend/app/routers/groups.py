@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import get_current_user
 from ..database import get_db
 from ..models import Device, Group, User
+from ..rbac import _check_device_access
 from ..schemas import GroupCreate, GroupOut
 
 router = APIRouter(prefix="/groups", tags=["groups"], dependencies=[Depends(get_current_user)])
@@ -220,7 +221,7 @@ async def update_group(
 
 @router.post("/{group_id}/move-devices")
 async def move_devices(
-    group_id: int, body: MoveDevices, db: AsyncSession = Depends(get_db)
+    group_id: int, body: MoveDevices, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
 ) -> dict:
     """把指定设备移动到分组 group_id；group_id==0 表示取消分组。"""
     target: int | None
@@ -239,6 +240,6 @@ async def move_devices(
         await db.execute(select(Device).where(Device.id.in_(body.device_ids)))
     ).scalars().all()
     for d in devices:
-        d.group_id = target
+        _check_device_access(user, d); d.group_id = target
     await db.commit()
     return {"moved": len(devices)}

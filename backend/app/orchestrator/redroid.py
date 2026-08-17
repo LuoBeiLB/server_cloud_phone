@@ -480,12 +480,41 @@ class RedroidBackend(DeviceBackend):
             await self._adb(device, "shell", "input", "text", text.replace(" ", "%s"))
 
     async def _ensure_adbkeyboard(self, device: Device) -> bool:
-        """确保 ADBKeyboard 输入法已安装并启用。返回 True 表示可用。"""
+        """确保 ADBKeyboard 输入法已安装、启用、设为默认。返回 True 表示可用。
+
+        关键修复（之前只 enable 没 set，所以即便 install 成功，IME 也不是默认，
+        物理键盘字符仍然进不去）：现在每一步都打日志、装好后强制 ime set，
+        并在「包在但 IME 不在默认」的场景里也直接 set。
+        """
         import logging
         logger = logging.getLogger("redroid")
-        code, out, _ = await self._adb(device, "shell", "pm", "list", "packages", "com.android.adbkeyboard")
+
+        # 1. 先看包是否已经装好
+        code, out, _ = await self._adb(
+            device, "shell", "pm", "list", "packages", "com.android.adbkeyboard"
+        )
+        if code != 0:
+            logger.warning(
+                "设备 %s 探测 ADBKeyboard 包失败（exit %d），降级为 adb input text",
+                device.id, code,
+            )
+            return False
         if b"com.android.adbkeyboard" in out:
+            # 包在 —— 但 IME 可能没切为默认；检查并切
+            code2, cur, _ = await self._adb(
+                device, "shell", "settings", "get", "secure", "default_input_method"
+            )
+            if code2 == 0 and cur.strip() == b"com.android.adbkeyboard/.AdbIME":
+                return True
+            logger.info(
+                "设备 %s ADBKeyboard 已安装但当前默认 IME 不是它，切为默认", device.id,
+            )
+            await self._adb(
+                device, "shell", "ime", "set", "com.android.adbkeyboard/.AdbIME"
+            )
             return True
+
+        # 2. 没装，从后端 skins 目录找 apk 推过去
         apk = os.path.join(_SKIN_DIR, "ADBKeyboard.apk")
         if not os.path.exists(apk):
             logger.warning(
@@ -494,14 +523,30 @@ class RedroidBackend(DeviceBackend):
                 apk,
             )
             return False
+
+        logger.info("设备 %s ADBKeyboard 未安装，开始 push APK 安装", device.id)
         code, _, err = await self._adb(device, "install", "-r", apk)
         if code != 0:
             logger.warning(
-                "ADBKeyboard 安装失败：%s", err.decode(errors="replace").strip()[:200],
+                "设备 %s ADBKeyboard 安装失败：%s",
+                device.id, err.decode(errors="replace").strip()[:200],
             )
             return False
-        await self._adb(device, "shell", "ime", "enable", "com.android.adbkeyboard/.AdbIME")
-        logger.info("设备 %s ADBKeyboard 安装并启用完成", device.id)
+
+        # 3. 装好之后 enable + set 默认（关键：之前漏了 set）
+        await self._adb(
+            device, "shell", "ime", "enable", "com.android.adbkeyboard/.AdbIME"
+        )
+        code_set, _, err_set = await self._adb(
+            device, "shell", "ime", "set", "com.android.adbkeyboard/.AdbIME"
+        )
+        if code_set != 0:
+            logger.warning(
+                "设备 %s ADBKeyboard 切默认 IME 失败：%s（包已装但当前 IME 可能仍是别的，键盘输入可能仍失效）",
+                device.id, err_set.decode(errors="replace").strip()[:200],
+            )
+        else:
+            logger.info("设备 %s ADBKeyboard 安装并设为默认 IME 完成", device.id)
         return True
 
     async def key(self, device: Device, key: str) -> None:

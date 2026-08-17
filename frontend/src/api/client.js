@@ -170,8 +170,17 @@ export const api = {
   // 单机操控
   control: (id, action, body) => http.post(`/devices/${id}/control/${action}`, body),
 
-  // 批量
+  // 批量（1 控 N / 群控）
+  // 通用方法保留：业务代码可调 api.batch('open_url', { device_ids, url })
   batch: (action, body) => http.post(`/batch/${action}`, body),
+  // 具体方法（Batch.vue 用的就是这些）：坐标由后端按主控分辨率归一化后分发到各从机
+  batchOpenUrl: (device_ids, url) => http.post('/batch/open_url', { device_ids, url }),
+  batchTap: (device_ids, x, y) => http.post('/batch/tap', { device_ids, x, y }),
+  batchSwipe: (device_ids, x1, y1, x2, y2, duration_ms = 300) =>
+    http.post('/batch/swipe', { device_ids, x1, y1, x2, y2, duration_ms }),
+  batchText: (device_ids, text) => http.post('/batch/text', { device_ids, text }),
+  batchKey: (device_ids, key) => http.post('/batch/key', { device_ids, key }),
+  batchInstall: (device_ids, apk_url) => http.post('/batch/install', { device_ids, apk_url }),
 
   // 脚本
   listScripts: () => http.get('/scripts'),

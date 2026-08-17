@@ -21,7 +21,8 @@ from starlette.background import BackgroundTask
 
 from ..auth import get_current_user
 from ..database import get_db
-from ..models import Device
+from ..models import Device, User
+from ..rbac import _check_device_access
 from .. import services
 
 router = APIRouter(prefix="/devices", tags=["files"], dependencies=[Depends(get_current_user)])
@@ -30,10 +31,11 @@ router = APIRouter(prefix="/devices", tags=["files"], dependencies=[Depends(get_
 _PROTECTED = {"", "/", "/sdcard", "/sdcard/"}
 
 
-async def _get_or_404(db: AsyncSession, device_id: int) -> Device:
+async def _get_or_404(db: AsyncSession, device_id: int, user: User) -> Device:
     device = await db.get(Device, device_id)
     if device is None:
         raise HTTPException(404, "设备不存在")
+    _check_device_access(user, device)
     return device
 
 
@@ -42,8 +44,9 @@ async def list_files(
     device_id: int,
     path: str = Query("/sdcard/", description="要浏览的设备目录"),
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> dict:
-    device = await _get_or_404(db, device_id)
+    device = await _get_or_404(db, device_id, user)
     items = await services.backend.list_files(device, path)
     return {"path": path, "items": items}
 
@@ -54,8 +57,9 @@ async def upload_file(
     file: UploadFile = File(...),
     remote_dir: str = Form("/sdcard/"),
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> dict:
-    device = await _get_or_404(db, device_id)
+    device = await _get_or_404(db, device_id, user)
     # 先把上传流落到本地临时文件，再交给编排后端 push 到设备。
     with tempfile.NamedTemporaryFile(delete=False) as tmp:
         tmp_path = tmp.name
@@ -77,8 +81,9 @@ async def download_file(
     device_id: int,
     path: str = Query(..., description="要下载的设备文件绝对路径"),
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> FileResponse:
-    device = await _get_or_404(db, device_id)
+    device = await _get_or_404(db, device_id, user)
     # 先 pull 到本地临时文件，再作为附件回传；响应结束后后台清理临时文件。
     fd, tmp_path = tempfile.mkstemp()
     os.close(fd)
@@ -98,8 +103,9 @@ async def delete_file(
     device_id: int,
     path: str = Query(..., description="要删除的设备文件 / 目录绝对路径"),
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> dict:
-    device = await _get_or_404(db, device_id)
+    device = await _get_or_404(db, device_id, user)
     if path.strip() in _PROTECTED:
         raise HTTPException(400, "禁止删除该目录")
     await services.backend.delete_file(device, path)

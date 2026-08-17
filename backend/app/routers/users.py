@@ -68,6 +68,9 @@ async def create_user(
         raise HTTPException(400, "非法角色")
     if not body.password:
         raise HTTPException(400, "密码不能为空")
+    # 角色提升限制：非 superadmin 只能创建 viewer/operator
+    if actor.role != "superadmin" and ROLE_LEVELS[body.role] >= ROLE_LEVELS[actor.role]:
+        raise HTTPException(403, "你没有权限创建该角色的用户")
     exists = (
         await db.execute(select(User).where(User.username == username))
     ).scalar_one_or_none()
@@ -101,6 +104,12 @@ async def update_user(
     if body.role is not None and body.role != user.role:
         if body.role not in VALID_ROLES:
             raise HTTPException(400, "非法角色")
+        # 角色提升限制：非 superadmin 不能修改到 >= 自身等级，也不能修改 superadmin 用户
+        if actor.role != "superadmin":
+            if user.role == "superadmin":
+                raise HTTPException(403, "你没有权限修改超级管理员")
+            if ROLE_LEVELS[body.role] >= ROLE_LEVELS[actor.role]:
+                raise HTTPException(403, "你没有权限将该用户提升到此角色")
         # 保护：不能把最后一个超级管理员降级
         if user.role == "superadmin" and await _count_superadmin(db) <= 1:
             raise HTTPException(400, "不能降级最后一个超级管理员")

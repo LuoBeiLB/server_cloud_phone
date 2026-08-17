@@ -20,7 +20,7 @@ from ..auth import get_current_user
 from ..database import SessionLocal, get_db
 from ..models import Device, User
 from ..preview import THEME_LIST, THEMES, render_frame
-from ..rbac import record_audit
+from ..rbac import _check_device_access, record_audit
 from ..services import backend
 from ..ws_manager import manager
 
@@ -118,9 +118,13 @@ async def apply_skin_batch(
     """
     _check_theme(body.theme)
     q = select(Device)
+    if user.role not in ("admin", "superadmin"):
+        q = q.where(Device.created_by == user.id)
     if body.device_ids:
         q = q.where(Device.id.in_(body.device_ids))
     devices = list((await db.execute(q)).scalars().all())
+    for d in devices:
+        _check_device_access(user, d)
     ids = [d.id for d in devices]
     for d in devices:
         d.skin = body.theme
@@ -140,12 +144,14 @@ async def device_skin(
     screen: str = Query("home"),
     theme: str | None = Query(None, description="覆盖主题；缺省用设备当前皮肤"),
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> dict:
     if screen not in _SCREENS:
         raise HTTPException(400, f"screen 取值：{sorted(_SCREENS)}")
     device = await db.get(Device, device_id)
     if device is None:
         raise HTTPException(404, "设备不存在")
+    _check_device_access(user, device)
     use_theme = theme or getattr(device, "skin", "ios") or "ios"
     _check_theme(use_theme)
     frame = render_frame(
@@ -166,6 +172,7 @@ async def apply_skin(
     device = await db.get(Device, device_id)
     if device is None:
         raise HTTPException(404, "设备不存在")
+    _check_device_access(user, device)
     device.skin = body.theme
     await db.commit()
     await record_audit(db, user.username, "skin.apply", target=device.name, detail={"theme": body.theme})

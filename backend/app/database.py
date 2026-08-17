@@ -38,6 +38,8 @@ async def init_db() -> None:
     for ddl in (
         "ALTER TABLE devices ADD COLUMN skin VARCHAR(32) DEFAULT 'ios'",
         "ALTER TABLE devices ADD COLUMN last_error VARCHAR(2000)",
+
+        "ALTER TABLE devices ADD COLUMN created_by INTEGER",
     ):
         try:
             async with engine.begin() as conn:

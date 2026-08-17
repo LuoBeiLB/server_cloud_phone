@@ -4,8 +4,12 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api/client'
 import { useDevices, SKIN_PHASE_TEXT } from '../stores/devices'
+import { useAuth } from '../stores/auth'
 
 const store = useDevices()
+const auth = useAuth()
+
+const canCreate = computed(() => auth.user?.role !== 'viewer')
 const router = useRouter()
 
 const filter = ref({ q: '', status: '', group_id: '' })
@@ -19,6 +23,8 @@ const skinDlg = ref(false)
 const skinThemes = ref([])
 const skinForm = ref({ theme: 'ios', scope: 'all' })
 const skinning = ref(false)
+// 启动/停止按钮的 loading 状态：key 为设备 id
+const deviceActionLoading = ref({})
 const form = ref({
   count: 10,
   name_prefix: '演示机',
@@ -62,7 +68,20 @@ function onPageChange(p) {
   })
 }
 
+// 每页条数：默认 20，可切 8/20/50/100
+function onPageSizeChange(sz) {
+  store.pageSize = sz
+  store.page = 1
+  store.refresh({
+    q: filter.value.q || undefined,
+    status: filter.value.status || undefined,
+    group_id: filter.value.group_id || undefined,
+  })
+}
+
 onMounted(async () => {
+  // 默认每页 20 条（之前是默认 10）
+  if (store.pageSize === 10) store.pageSize = 10
   store.page = 1
   store.refresh({
     q: filter.value.q || undefined,
@@ -92,7 +111,7 @@ async function applySkinRow(id, theme) {
 
 function openSkinDlg() {
   // 勾选了设备就默认应用到「已选设备」；没勾选则回到「全部设备」
-  skinForm.value.scope = selected.value.length ? 'selected' : 'all'
+  skinForm.value.scope = store.allSelectedCount ? 'selected' : 'all'
   skinDlg.value = true
 }
 
@@ -100,8 +119,8 @@ async function applySkinBatch() {
   const scope = skinForm.value.scope
   let ids = []
   if (scope === 'selected') {
-    if (!selected.value.length) return ElMessage.warning('尚未勾选设备，请先在列表中勾选要换肤的设备')
-    ids = selected.value.map((d) => d.id)
+    if (!store.allSelectedCount) return ElMessage.warning('尚未勾选设备，请先在列表中勾选要换肤的设备')
+    ids = [...store.allSelectedIds]
   }
   // scope === 'all'：ids 保持空数组，后端会应用到全部设备
   skinning.value = true
@@ -137,12 +156,15 @@ async function batchCreate() {
 }
 
 async function act(fn, id, okMsg) {
+  deviceActionLoading.value[id] = true
   try {
     await fn(id)
     if (okMsg) ElMessage.success(okMsg)
     await store.refresh({ q: filter.value.q || undefined, status: filter.value.status || undefined, group_id: filter.value.group_id || undefined })
   } catch (e) {
     ElMessage.error(e?.response?.data?.detail || '操作失败')
+  } finally {
+    deviceActionLoading.value[id] = false
   }
 }
 
@@ -176,15 +198,94 @@ async function assignGroup(d, gid) {
 
 // ---- 批量删除 ----
 // 切后端 / 跑过冒烟测试后常留下几十台废设备，一台台点删除不可接受。
-const selected = ref([])
+// 「已选」以 store.allSelectedIds 为单一事实源（跨页保留），表格内 reserve-selection 只是 UI 表现。
+const selected = ref([]) // 当前页 el-table 内部的勾选（reserve-selection 跨页保留，仅 UI 用）
 const deleting = ref(false)
 const tableRef = ref(null)
+
+// 同步：把 el-table 当前页选中的 + store 里所有「非当前页」已选 → 合并写到 store.allSelectedIds
+// （确保 Batch.vue 跨页面读到的 N 台是全集，而不是只当前页）
+function syncSelectionToStore() {
+  // 当前页可见 id：store.list 的所有 id
+  const currentPageIds = new Set(store.list.map((d) => d.id))
+  const set = new Set()
+  // 1) 当前页 el-table 勾选的全部纳入
+  for (const d of selected.value) set.add(d.id)
+  // 2) 保留 store 中所有「非当前页」已选（它们只可能在 store 里）
+  for (const id of store.allSelectedIds) {
+    if (!currentPageIds.has(id)) set.add(id)
+  }
+  store.setAllSelectedIds([...set])
+}
+
 function onSelectionChange(rows) {
   selected.value = rows
+  syncSelectionToStore()
 }
+
+// 「全选所有页」：按 store.total 拉所有 id（全部分页+全部分组，绕过当前筛选）
+// 简化版：直接用 store.total（API 已返回）。若有筛选条件，则用「全选所有页」+ 当前筛选
+const selectingAll = ref(false)
+async function selectAllPages() {
+  if (!store.total) return ElMessage.warning('当前没有设备可全选')
+  try {
+    await ElMessageBox.confirm(
+      `将从服务端拉取所有 ${store.total} 台设备的 id（应用当前筛选），并标记为已选。\n用于「批量操控」的 1 控 N 主控同步。`,
+      '全选所有页',
+      { type: 'info', confirmButtonText: '全选', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  selectingAll.value = true
+  try {
+    // 拉所有页（应用当前筛选），按后端 max page_size 分页循环取
+    // 后端 page_size 上限通常 ≤100，单次 page_size=1000 会触发 422
+    const ids = []
+    const pageSize = 100
+    let p = 1
+    while (ids.length < store.total) {
+      const { data } = await api.listDevices({
+        page: p,
+        page_size: pageSize,
+        q: filter.value.q || undefined,
+        status: filter.value.status || undefined,
+        group_id: filter.value.group_id || undefined,
+      })
+      const items = Array.isArray(data) ? data : data.items || []
+      if (items.length === 0) break
+      ids.push(...items.map((d) => d.id))
+      if (items.length < pageSize) break
+      p += 1
+      // 保险：最多循环 50 次（5000 台），防止后端 total 撒谎时死循环
+      if (p > 50) break
+    }
+    store.setAllSelectedIds(ids)
+    // 让 el-table 内部 reserve-selection 同步高亮（仅当前页可见的行会被勾上）
+    selected.value = store.list.filter((d) => store.allSelectedIds.includes(d.id))
+    tableRef.value?.clearSelection()
+    // 等待 nextTick 再设勾选
+    setTimeout(() => {
+      for (const d of selected.value) tableRef.value?.toggleRowSelection(d, true)
+    }, 0)
+    ElMessage.success(`已全选 ${ids.length} 台`)
+  } catch (e) {
+    ElMessage.error(e?.friendly || '全选失败')
+  } finally {
+    selectingAll.value = false
+  }
+}
+
+function clearAllSelection() {
+  store.clearAllSelectedIds()
+  selected.value = []
+  tableRef.value?.clearSelection()
+  ElMessage.success('已清空已选设备')
+}
+
 async function batchRemove() {
-  const ids = selected.value.map((d) => d.id)
-  if (!ids.length) return ElMessage.warning('请先勾选要删除的设备')
+  if (!store.allSelectedCount) return ElMessage.warning('请先勾选要删除的设备')
+  const ids = [...store.allSelectedIds]
   try {
     await ElMessageBox.confirm(
       `确认删除选中的 ${ids.length} 台设备？真机模式下会一并销毁对应容器，此操作不可恢复。`,
@@ -206,8 +307,8 @@ async function batchRemove() {
     } else {
       ElMessage.success(`已删除 ${data.ok} 台`)
     }
-    // 清空勾选：selected 只是数据层，表格内部 reserve-selection 仍保留勾选状态，
-    // 必须调用 clearSelection() 才会同步清掉 UI 上的勾选（否则已删 id 残留、全选计数错乱）
+    // 清空已选（store + el-table 内部 reserve-selection）
+    store.clearAllSelectedIds()
     selected.value = []
     tableRef.value?.clearSelection()
   } catch {
@@ -221,12 +322,11 @@ async function batchRemove() {
 
 async function remove(d) {
   await ElMessageBox.confirm(`删除设备「${d.name}」？`, '确认', { type: 'warning' })
-  const wasSelected = selected.value.some((x) => x.id === d.id)
   await act(api.deleteDevice, d.id, '已删除')
-  // 若删除的是已勾选设备，清空表格内部保留的勾选（reserve-selection 不会自动移除）
-  if (wasSelected) {
-    selected.value = []
-    tableRef.value?.clearSelection()
+  // 若删除的是已选设备，从 store 里也移除（避免「已选 N/共 M」残留）
+  if (store.allSelectedIds.includes(d.id)) {
+    store.removeAllSelectedId(d.id)
+    selected.value = selected.value.filter((x) => x.id !== d.id)
   }
 }
 
@@ -262,12 +362,12 @@ const statusText = { running: '运行中', stopped: '已停止', creating: '创�
       <div class="page-title">设备管理</div>
       <div class="page-header-right">
         <el-button @click="openSkinDlg">一键换肤</el-button>
-        <el-button type="danger" :disabled="!selected.length" :loading="deleting" @click="batchRemove">批量删除</el-button>
-        <el-button type="primary" @click="createDlg = true">+ 添加设备</el-button>
+        <el-button type="danger" :disabled="!store.allSelectedCount" :loading="deleting" @click="batchRemove">批量删除</el-button>
+        <el-button type="primary" @click="createDlg = true" v-if="canCreate">+ 添加设备</el-button>
       </div>
     </div>
 
-    <!-- 筛选栏 -->
+    <!-- 筛选栏 + 已选统计 -->
     <div class="filter-bar">
       <el-input
         v-model="filter.q"
@@ -287,12 +387,23 @@ const statusText = { running: '运行中', stopped: '已停止', creating: '创�
       </el-select>
       <el-button size="small" link @click="newGroup">+ 新建分组</el-button>
       <div class="spacer"></div>
-      <span class="device-count">共 {{ store.total }} 台设备</span>
+      <!-- 已选统计 + 全选所有页 + 清空选择 -->
+      <el-tag :type="store.allSelectedCount ? 'success' : 'info'" effect="dark" class="selection-tag">
+        已选 {{ store.allSelectedCount }} 台 / 共 {{ store.total }} 台
+      </el-tag>
+      <el-button size="small" type="primary" plain :loading="selectingAll" @click="selectAllPages">
+        全选所有页
+      </el-button>
+      <el-button size="small" :disabled="!store.allSelectedCount" link @click="clearAllSelection">
+        清空选择
+      </el-button>
     </div>
 
     <!-- 设备表格 -->
     <el-table
       ref="tableRef"
+      v-loading="store.loading"
+      element-loading-text="加载中..."
       :data="store.list"
       stripe
       style="width: 100%"
@@ -365,16 +476,17 @@ const statusText = { running: '运行中', stopped: '已停止', creating: '创�
           <el-button
             size="small"
             link
+            :loading="deviceActionLoading[row.id]"
             :type="row.status === 'running' ? 'warning' : ''"
             @click="act(row.status === 'running' ? api.stopDevice : api.startDevice, row.id, row.status === 'running' ? '已停止' : '已启动')"
-          >{{ row.status === 'running' ? '停止' : '启动' }}</el-button>
+          >{{ deviceActionLoading[row.id] ? (row.status === 'running' ? '停止中' : '启动中') : (row.status === 'running' ? '停止' : '启动') }}</el-button>
           <el-button size="small" link @click="rename(row)">改名</el-button>
           <el-button size="small" link type="danger" @click="remove(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
 
-    <!-- 分页 -->
+    <!-- 分页：完整 layout（每页条数 + prev/pager/next + total） -->
     <div class="pagination-bar">
       <span class="page-info">
         显示第 {{ store.total ? (store.page - 1) * store.pageSize + 1 : 0 }}-{{ Math.min(store.page * store.pageSize, store.total) }} 条，共 {{ store.total }} 条
@@ -383,9 +495,11 @@ const statusText = { running: '运行中', stopped: '已停止', creating: '创�
         :current-page="store.page"
         :total="store.total"
         :page-size="store.pageSize"
-        layout="prev, pager, next"
-        small
+        :page-sizes="[10, 20, 50, 100]"
+        layout="sizes, prev, pager, next, total"
+        size="small"
         @current-change="onPageChange"
+        @size-change="onPageSizeChange"
       />
     </div>
 
@@ -429,8 +543,8 @@ const statusText = { running: '运行中', stopped: '已停止', creating: '创�
         </el-form-item>
         <el-form-item label="应用范围">
           <el-radio-group v-model="skinForm.scope">
-            <el-radio value="all">全部设备（{{ store.list.length }} 台）</el-radio>
-            <el-radio value="selected" :disabled="!selected.length">已选设备（{{ selected.length }} 台）</el-radio>
+            <el-radio value="all">全部设备（{{ store.total }} 台）</el-radio>
+            <el-radio value="selected" :disabled="!store.allSelectedCount">已选设备（{{ store.allSelectedCount }} 台）</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-alert
@@ -477,6 +591,13 @@ const statusText = { running: '运行中', stopped: '已停止', creating: '创�
   align-items: center;
   gap: 12px;
   margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.spacer {
+  flex: 1;
+}
+.selection-tag {
+  font-weight: 600;
 }
 .device-count {
   color: var(--text-secondary);

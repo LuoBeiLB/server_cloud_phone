@@ -13,7 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user
 from ..database import get_db
-from ..models import Device
+from ..models import Device, User
+from ..rbac import _check_device_access
 from ..schemas import (
     BatchInstall,
     BatchKey,
@@ -33,9 +34,11 @@ async def _fetch(db: AsyncSession, ids: list[int]) -> list[Device]:
     return list((await db.execute(select(Device).where(Device.id.in_(ids)))).scalars().all())
 
 
-async def _run_all(db: AsyncSession, ids: list[int], action_name: str, fn) -> BatchResult:
+async def _run_all(db: AsyncSession, ids: list[int], action_name: str, fn, user: User) -> BatchResult:
     """对目标设备并发执行 fn(device)，实时广播进度，汇总结果。"""
     devices = await _fetch(db, ids)
+    for device in devices:
+        _check_device_access(user, device)
     details: list[dict] = []
     done = 0
 
@@ -64,52 +67,52 @@ def _scale(device: Device, x: int, y: int, ref_w: int = 1080, ref_h: int = 1920)
 
 
 @router.post("/open_url", response_model=BatchResult)
-async def batch_open_url(body: BatchOpenUrl, db: AsyncSession = Depends(get_db)) -> BatchResult:
+async def batch_open_url(body: BatchOpenUrl, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> BatchResult:
     async def fn(d: Device) -> None:
         await services.backend.open_url(d, body.url)
         await services.broadcast_device(d)
 
-    return await _run_all(db, body.device_ids, "open_url", fn)
+    return await _run_all(db, body.device_ids, "open_url", fn, user)
 
 
 @router.post("/tap", response_model=BatchResult)
-async def batch_tap(body: BatchTap, db: AsyncSession = Depends(get_db)) -> BatchResult:
+async def batch_tap(body: BatchTap, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> BatchResult:
     async def fn(d: Device) -> None:
         x, y = _scale(d, body.x, body.y)
         await services.backend.tap(d, x, y)
 
-    return await _run_all(db, body.device_ids, "tap", fn)
+    return await _run_all(db, body.device_ids, "tap", fn, user)
 
 
 @router.post("/swipe", response_model=BatchResult)
-async def batch_swipe(body: BatchSwipe, db: AsyncSession = Depends(get_db)) -> BatchResult:
+async def batch_swipe(body: BatchSwipe, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> BatchResult:
     async def fn(d: Device) -> None:
         x1, y1 = _scale(d, body.x1, body.y1)
         x2, y2 = _scale(d, body.x2, body.y2)
         await services.backend.swipe(d, x1, y1, x2, y2, body.duration_ms)
 
-    return await _run_all(db, body.device_ids, "swipe", fn)
+    return await _run_all(db, body.device_ids, "swipe", fn, user)
 
 
 @router.post("/text", response_model=BatchResult)
-async def batch_text(body: BatchText, db: AsyncSession = Depends(get_db)) -> BatchResult:
+async def batch_text(body: BatchText, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> BatchResult:
     async def fn(d: Device) -> None:
         await services.backend.input_text(d, body.text)
 
-    return await _run_all(db, body.device_ids, "text", fn)
+    return await _run_all(db, body.device_ids, "text", fn, user)
 
 
 @router.post("/key", response_model=BatchResult)
-async def batch_key(body: BatchKey, db: AsyncSession = Depends(get_db)) -> BatchResult:
+async def batch_key(body: BatchKey, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> BatchResult:
     async def fn(d: Device) -> None:
         await services.backend.key(d, body.key)
 
-    return await _run_all(db, body.device_ids, "key", fn)
+    return await _run_all(db, body.device_ids, "key", fn, user)
 
 
 @router.post("/install", response_model=BatchResult)
-async def batch_install(body: BatchInstall, db: AsyncSession = Depends(get_db)) -> BatchResult:
+async def batch_install(body: BatchInstall, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> BatchResult:
     async def fn(d: Device) -> None:
         await services.backend.install(d, body.apk_url)
 
-    return await _run_all(db, body.device_ids, "install", fn)
+    return await _run_all(db, body.device_ids, "install", fn, user)
