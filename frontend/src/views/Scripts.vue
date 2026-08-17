@@ -1,6 +1,6 @@
 <script setup>
 import { onMounted, ref, computed } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api/client'
 import http from '../api/client'
 import { useDevices } from '../stores/devices'
@@ -268,6 +268,15 @@ async function doRun() {
 }
 
 async function del(s) {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除脚本「${s.name}」吗？删除后不可恢复。`,
+      '删除确认',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return // 用户点了取消
+  }
   try {
     await api.deleteScript(s.id)
   } catch {
