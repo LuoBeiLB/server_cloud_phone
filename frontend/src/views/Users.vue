@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, ref, computed, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import http from '../api/client'
 import { useAuth } from '../stores/auth'
@@ -34,6 +34,17 @@ const roleFilter = ref('')
 // 分页
 const currentPage = ref(1)
 const pageSize = ref(10)
+
+// 分页切换时的局部 loading（前端分页很快，用短暂遮罩提供视觉反馈）
+const tableLoading = ref(false)
+watch(currentPage, () => {
+  tableLoading.value = true
+  nextTick(() => {
+    setTimeout(() => {
+      tableLoading.value = false
+    }, 150)
+  })
+})
 
 const filteredUsers = computed(() => {
   let result = users.value
@@ -207,7 +218,8 @@ function isDisabled(u) {
         </el-select>
       </div>
 
-      <el-table :data="pagedUsers" v-loading="loading" border stripe style="width: 100%" size="default">
+      <el-table :data="pagedUsers" v-loading="loading || tableLoading"
+          element-loading-text="加载中..." border stripe style="width: 100%" size="default">
         <el-table-column prop="username" label="用户名" min-width="140" />
 
         <el-table-column label="角色" width="130">

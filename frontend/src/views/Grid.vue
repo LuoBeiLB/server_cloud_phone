@@ -19,7 +19,9 @@ const devices = ref([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(16)
+const loading = ref(false)
 async function loadDevices() {
+  loading.value = true
   try {
     const params = { page: page.value, page_size: pageSize.value }
     if (groupId.value) params.group_id = groupId.value
@@ -29,6 +31,8 @@ async function loadDevices() {
   } catch {
     devices.value = []
     total.value = 0
+  } finally {
+    loading.value = false
   }
 }
 
@@ -74,7 +78,7 @@ onBeforeUnmount(() => store.subscribePreviews([], 1))
       </div>
     </div>
 
-    <div class="grid" :style="{ gridTemplateColumns: `repeat(${gridN}, 1fr)` }">
+    <div v-loading="loading" element-loading-text="加载中..." class="grid" :style="{ gridTemplateColumns: `repeat(${gridN}, 1fr)` }">
       <div class="preview-card" v-for="d in devices" :key="d.id">
         <div class="preview-status" :class="d.status">
           <span class="dot" :class="d.status"></span>
