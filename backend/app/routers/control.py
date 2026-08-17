@@ -36,14 +36,14 @@ async def open_url(device_id: int, cmd: OpenUrlCmd, db: AsyncSession = Depends(g
 
 
 @router.post("/tap")
-async def tap(device_id: int, cmd: TapCmd, db: AsyncSession = Depends(get_db)) -> dict:
-    await services.backend.tap(await _get(db, device_id), cmd.x, cmd.y)
+async def tap(device_id: int, cmd: TapCmd, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    await services.backend.tap(await _get(db, device_id, user), cmd.x, cmd.y)
     return {"ok": True}
 
 
 @router.post("/swipe")
-async def swipe(device_id: int, cmd: SwipeCmd, db: AsyncSession = Depends(get_db)) -> dict:
-    await services.backend.swipe(await _get(db, device_id), cmd.x1, cmd.y1, cmd.x2, cmd.y2, cmd.duration_ms)
+async def swipe(device_id: int, cmd: SwipeCmd, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    await services.backend.swipe(await _get(db, device_id, user), cmd.x1, cmd.y1, cmd.x2, cmd.y2, cmd.duration_ms)
     return {"ok": True}
 
 
@@ -54,8 +54,8 @@ async def text(device_id: int, cmd: TextCmd, db: AsyncSession = Depends(get_db),
 
 
 @router.post("/key")
-async def key(device_id: int, cmd: KeyCmd, db: AsyncSession = Depends(get_db)) -> dict:
-    await services.backend.key(await _get(db, device_id), cmd.key)
+async def key(device_id: int, cmd: KeyCmd, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    await services.backend.key(await _get(db, device_id, user), cmd.key)
     return {"ok": True}
 
 
@@ -66,9 +66,9 @@ async def install(device_id: int, cmd: InstallCmd, db: AsyncSession = Depends(ge
 
 
 @router.post("/display")
-async def set_display(device_id: int, cmd: DisplayCmd, db: AsyncSession = Depends(get_db)) -> dict:
+async def set_display(device_id: int, cmd: DisplayCmd, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     """运行时切换分辨率/DPI（CP-007）。"""
-    device = await _get(db, device_id)
+    device = await _get(db, device_id, user)
     await services.backend.set_display(device, cmd.width, cmd.height, cmd.dpi)
     await db.commit()
     await services.broadcast_device(device)

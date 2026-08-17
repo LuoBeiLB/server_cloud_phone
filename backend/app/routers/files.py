@@ -57,8 +57,9 @@ async def upload_file(
     file: UploadFile = File(...),
     remote_dir: str = Form("/sdcard/"),
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> dict:
-    device = await _get_or_404(db, device_id)
+    device = await _get_or_404(db, device_id, user)
     # 先把上传流落到本地临时文件，再交给编排后端 push 到设备。
     with tempfile.NamedTemporaryFile(delete=False) as tmp:
         tmp_path = tmp.name
@@ -80,8 +81,9 @@ async def download_file(
     device_id: int,
     path: str = Query(..., description="要下载的设备文件绝对路径"),
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> FileResponse:
-    device = await _get_or_404(db, device_id)
+    device = await _get_or_404(db, device_id, user)
     # 先 pull 到本地临时文件，再作为附件回传；响应结束后后台清理临时文件。
     fd, tmp_path = tempfile.mkstemp()
     os.close(fd)

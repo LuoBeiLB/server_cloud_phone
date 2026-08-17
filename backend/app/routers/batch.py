@@ -72,11 +72,11 @@ async def batch_open_url(body: BatchOpenUrl, db: AsyncSession = Depends(get_db),
         await services.backend.open_url(d, body.url)
         await services.broadcast_device(d)
 
-    return await _run_all(db, body.device_ids, "open_url", fn)
+    return await _run_all(db, body.device_ids, "open_url", fn, user)
 
 
 @router.post("/tap", response_model=BatchResult)
-async def batch_tap(body: BatchTap, db: AsyncSession = Depends(get_db)) -> BatchResult:
+async def batch_tap(body: BatchTap, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> BatchResult:
     async def fn(d: Device) -> None:
         x, y = _scale(d, body.x, body.y)
         await services.backend.tap(d, x, y)
@@ -91,11 +91,11 @@ async def batch_swipe(body: BatchSwipe, db: AsyncSession = Depends(get_db), user
         x2, y2 = _scale(d, body.x2, body.y2)
         await services.backend.swipe(d, x1, y1, x2, y2, body.duration_ms)
 
-    return await _run_all(db, body.device_ids, "swipe", fn)
+    return await _run_all(db, body.device_ids, "swipe", fn, user)
 
 
 @router.post("/text", response_model=BatchResult)
-async def batch_text(body: BatchText, db: AsyncSession = Depends(get_db)) -> BatchResult:
+async def batch_text(body: BatchText, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> BatchResult:
     async def fn(d: Device) -> None:
         await services.backend.input_text(d, body.text)
 
@@ -115,4 +115,4 @@ async def batch_install(body: BatchInstall, db: AsyncSession = Depends(get_db), 
     async def fn(d: Device) -> None:
         await services.backend.install(d, body.apk_url)
 
-    return await _run_all(db, body.device_ids, "install", fn)
+    return await _run_all(db, body.device_ids, "install", fn, user)

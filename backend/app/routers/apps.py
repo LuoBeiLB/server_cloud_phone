@@ -10,8 +10,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import tempfile
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,10 +24,6 @@ from ..models import Device, User
 from ..rbac import _check_device_access
 from .. import services
 from ..ws_manager import manager
-
-import tempfile
-import os
-from fastapi import UploadFile, File, Form
 
 router = APIRouter(tags=["apps"], dependencies=[Depends(get_current_user)])
 
@@ -85,8 +83,8 @@ async def _run_all(db: AsyncSession, ids: list[int], action_name: str, fn, user:
 
 # --------- 单机应用动作 ---------
 @router.post("/devices/{device_id}/apps/uninstall")
-async def uninstall(device_id: int, body: AppAction, db: AsyncSession = Depends(get_db)) -> dict:
-    await services.backend.uninstall_app(await _get_or_404(db, device_id), body.package)
+async def uninstall(device_id: int, body: AppAction, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    await services.backend.uninstall_app(await _get_or_404(db, device_id, user), body.package)
     return {"ok": True}
 
 
@@ -103,26 +101,26 @@ async def stop(device_id: int, body: AppAction, db: AsyncSession = Depends(get_d
 
 
 @router.post("/devices/{device_id}/apps/clear")
-async def clear(device_id: int, body: AppAction, db: AsyncSession = Depends(get_db)) -> dict:
-    await services.backend.clear_app(await _get_or_404(db, device_id), body.package)
+async def clear(device_id: int, body: AppAction, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    await services.backend.clear_app(await _get_or_404(db, device_id, user), body.package)
     return {"ok": True}
 
 
 # --------- 批量应用动作 ---------
 @router.post("/apps/batch/uninstall")
-async def batch_uninstall(body: BatchAppAction, db: AsyncSession = Depends(get_db)) -> dict:
+async def batch_uninstall(body: BatchAppAction, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     async def fn(d: Device) -> None:
         await services.backend.uninstall_app(d, body.package)
 
-    return await _run_all(db, body.device_ids, "app_uninstall", fn)
+    return await _run_all(db, body.device_ids, "app_uninstall", fn, user)
 
 
 @router.post("/apps/batch/launch")
-async def batch_launch(body: BatchAppAction, db: AsyncSession = Depends(get_db)) -> dict:
+async def batch_launch(body: BatchAppAction, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     async def fn(d: Device) -> None:
         await services.backend.launch_app(d, body.package)
 
-    return await _run_all(db, body.device_ids, "app_launch", fn)
+    return await _run_all(db, body.device_ids, "app_launch", fn, user)
 
 
 @router.post("/apps/batch/stop")
@@ -146,7 +144,8 @@ async def batch_install(body: BatchAppInstall, db: AsyncSession = Depends(get_db
     async def fn(d: Device) -> None:
         await services.backend.install(d, body.apk_url)
 
-    return await _run_all(db, body.device_ids, "app_install", fn)
+    return await _run_all(db, body.device_ids, "app_install", fn, user)
+
 
 @router.post("/apps/batch/install-upload")
 async def batch_install_upload(
