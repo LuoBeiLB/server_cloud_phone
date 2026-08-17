@@ -81,7 +81,7 @@ function onPageSizeChange(sz) {
 
 onMounted(async () => {
   // 默认每页 20 条（之前是默认 10）
-  if (store.pageSize === 10) store.pageSize = 20
+  if (store.pageSize === 10) store.pageSize = 10
   store.page = 1
   store.refresh({
     q: filter.value.q || undefined,
@@ -402,6 +402,8 @@ const statusText = { running: '运行中', stopped: '已停止', creating: '创�
     <!-- 设备表格 -->
     <el-table
       ref="tableRef"
+      v-loading="store.loading"
+      element-loading-text="加载中..."
       :data="store.list"
       stripe
       style="width: 100%"
@@ -493,7 +495,7 @@ const statusText = { running: '运行中', stopped: '已停止', creating: '创�
         :current-page="store.page"
         :total="store.total"
         :page-size="store.pageSize"
-        :page-sizes="[8, 20, 50, 100]"
+        :page-sizes="[10, 20, 50, 100]"
         layout="sizes, prev, pager, next, total"
         size="small"
         @current-change="onPageChange"

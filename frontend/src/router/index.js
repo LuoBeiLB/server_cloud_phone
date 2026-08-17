@@ -1,5 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { nextTick } from 'vue'
+import { ElMessage, ElLoading } from 'element-plus'
 import { useAuth } from '../stores/auth'
 
 const routes = [
@@ -36,10 +37,31 @@ const routes = [
 
 const router = createRouter({ history: createWebHashHistory(), routes })
 
+// 全局路由切换 loading：切换时显示全屏遮罩，目标页面 DOM 渲染完成后关闭
+let loadingInstance = null
+
+function openPageLoading() {
+  if (loadingInstance) return
+  loadingInstance = ElLoading.service({ fullscreen: true, text: '页面加载中...' })
+}
+
+function closePageLoading() {
+  if (!loadingInstance) return
+  loadingInstance.close()
+  loadingInstance = null
+}
+
 router.beforeEach((to) => {
+  openPageLoading()
   const auth = useAuth()
   if (to.name !== 'login' && !auth.isAuthed) return { name: 'login' }
   if (to.name === 'login' && auth.isAuthed) return { name: 'devices' }
+})
+
+router.afterEach(() => {
+  nextTick(() => {
+    closePageLoading()
+  })
 })
 
 // 懒加载 chunk 拉取失败 —— 重新发布后的头号「点击无反应」。
@@ -55,6 +77,7 @@ const CHUNK_ERR = /dynamically imported module|Importing a module script failed|
 const RELOAD_KEY = 'chunk-reload-at'
 
 router.onError((err) => {
+  closePageLoading()
   if (!CHUNK_ERR.test(err?.message || '')) return
   const last = Number(sessionStorage.getItem(RELOAD_KEY) || 0)
   // 10s 内不重复刷新，避免「刷新→仍失败→再刷新」的死循环

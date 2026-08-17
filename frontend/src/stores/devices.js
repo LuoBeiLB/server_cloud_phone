@@ -26,6 +26,7 @@ export const useDevices = defineStore('devices', {
     total: 0,
     page: 1,
     pageSize: 10,
+    loading: false,
     creating: false,
     groups: [],
     frames: {}, // device_id -> data URL 预览帧
@@ -60,6 +61,7 @@ export const useDevices = defineStore('devices', {
     // 这里吞掉异常但**必须留下痕迹**：拦截器已弹出提示，store 里记下失败标记，
     // 让页面能显示「数据可能不是最新」而不是安静地展示旧列表。
     async refresh(params) {
+      this.loading = true
       try {
         const query = { page: this.page, page_size: this.pageSize, ...(params || {}) }
         const { data } = await api.listDevices(query)
@@ -75,6 +77,8 @@ export const useDevices = defineStore('devices', {
       } catch (e) {
         this.loadError = e.friendly || e.message || '设备列表加载失败'
         return false
+      } finally {
+        this.loading = false
       }
     },
     async refreshGroups() {
