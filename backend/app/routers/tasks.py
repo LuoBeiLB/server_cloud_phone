@@ -19,7 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user
 from ..database import SessionLocal, get_db
-from ..models import Device
+from ..models import Device, User
+from ..rbac import _check_device_access
 from ..scheduler_models import ScheduledTask
 from .. import services
 from ..ws_manager import manager
@@ -96,6 +97,15 @@ def _compute_next_run(task: ScheduledTask) -> datetime | None:
 # --------- 动作下发（对齐 batch.py 的坐标折算与广播）---------
 def _scale(device: Device, x: int, y: int, ref_w: int = 1080, ref_h: int = 1920) -> tuple[int, int]:
     return int(x * device.width / ref_w), int(y * device.height / ref_h)
+
+
+async def _check_task_devices(db: AsyncSession, user: User, device_ids: list[int]) -> None:
+    """校验当前用户是否有权访问任务目标设备。"""
+    if not device_ids:
+        return
+    devices = list((await db.execute(select(Device).where(Device.id.in_(device_ids)))).scalars().all())
+    for device in devices:
+        _check_device_access(user, device)
 
 
 async def _dispatch(device: Device, action: str, p: dict) -> None:
@@ -207,7 +217,8 @@ async def list_tasks(db: AsyncSession = Depends(get_db)) -> list[ScheduledTask]:
 
 
 @router.post("", response_model=TaskOut)
-async def create_task(body: TaskCreate, db: AsyncSession = Depends(get_db)) -> ScheduledTask:
+async def create_task(body: TaskCreate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> ScheduledTask:
+    await _check_task_devices(db, user, body.device_ids or [])
     if body.action not in ACTIONS:
         raise HTTPException(400, f"不支持的动作: {body.action}")
     if body.schedule_type not in ("once", "interval"):
@@ -248,10 +259,12 @@ async def get_task(task_id: int, db: AsyncSession = Depends(get_db)) -> Schedule
 
 
 @router.patch("/{task_id}", response_model=TaskOut)
-async def update_task(task_id: int, body: TaskUpdate, db: AsyncSession = Depends(get_db)) -> ScheduledTask:
+async def update_task(task_id: int, body: TaskUpdate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> ScheduledTask:
     task = await db.get(ScheduledTask, task_id)
     if task is None:
         raise HTTPException(404, "任务不存在")
+    if body.device_ids is not None:
+        await _check_task_devices(db, user, body.device_ids)
 
     data = body.model_dump(exclude_unset=True)
     if "action" in data and data["action"] not in ACTIONS:
@@ -280,9 +293,10 @@ async def delete_task(task_id: int, db: AsyncSession = Depends(get_db)) -> dict:
 
 
 @router.post("/{task_id}/run-now", response_model=TaskOut)
-async def run_now(task_id: int, db: AsyncSession = Depends(get_db)) -> ScheduledTask:
+async def run_now(task_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> ScheduledTask:
     task = await db.get(ScheduledTask, task_id)
     if task is None:
         raise HTTPException(404, "任务不存在")
+    await _check_task_devices(db, user, list(task.device_ids or []))
     await execute_task(db, task)  # 立即执行，不改动排期
     return task

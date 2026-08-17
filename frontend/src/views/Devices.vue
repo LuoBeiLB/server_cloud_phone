@@ -4,8 +4,12 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api/client'
 import { useDevices, SKIN_PHASE_TEXT } from '../stores/devices'
+import { useAuth } from '../stores/auth'
 
 const store = useDevices()
+const auth = useAuth()
+
+const canCreate = computed(() => auth.user?.role !== 'viewer')
 const router = useRouter()
 
 const filter = ref({ q: '', status: '', group_id: '' })
@@ -19,6 +23,8 @@ const skinDlg = ref(false)
 const skinThemes = ref([])
 const skinForm = ref({ theme: 'ios', scope: 'all' })
 const skinning = ref(false)
+// 启动/停止按钮的 loading 状态：key 为设备 id
+const deviceActionLoading = ref({})
 const form = ref({
   count: 10,
   name_prefix: '演示机',
@@ -150,12 +156,15 @@ async function batchCreate() {
 }
 
 async function act(fn, id, okMsg) {
+  deviceActionLoading.value[id] = true
   try {
     await fn(id)
     if (okMsg) ElMessage.success(okMsg)
     await store.refresh({ q: filter.value.q || undefined, status: filter.value.status || undefined, group_id: filter.value.group_id || undefined })
   } catch (e) {
     ElMessage.error(e?.response?.data?.detail || '操作失败')
+  } finally {
+    deviceActionLoading.value[id] = false
   }
 }
 
@@ -354,7 +363,7 @@ const statusText = { running: '运行中', stopped: '已停止', creating: '创�
       <div class="page-header-right">
         <el-button @click="openSkinDlg">一键换肤</el-button>
         <el-button type="danger" :disabled="!store.allSelectedCount" :loading="deleting" @click="batchRemove">批量删除</el-button>
-        <el-button type="primary" @click="createDlg = true">+ 添加设备</el-button>
+        <el-button type="primary" @click="createDlg = true" v-if="canCreate">+ 添加设备</el-button>
       </div>
     </div>
 
@@ -465,9 +474,10 @@ const statusText = { running: '运行中', stopped: '已停止', creating: '创�
           <el-button
             size="small"
             link
+            :loading="deviceActionLoading[row.id]"
             :type="row.status === 'running' ? 'warning' : ''"
             @click="act(row.status === 'running' ? api.stopDevice : api.startDevice, row.id, row.status === 'running' ? '已停止' : '已启动')"
-          >{{ row.status === 'running' ? '停止' : '启动' }}</el-button>
+          >{{ deviceActionLoading[row.id] ? (row.status === 'running' ? '停止中' : '启动中') : (row.status === 'running' ? '停止' : '启动') }}</el-button>
           <el-button size="small" link @click="rename(row)">改名</el-button>
           <el-button size="small" link type="danger" @click="remove(row)">删除</el-button>
         </template>

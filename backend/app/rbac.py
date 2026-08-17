@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .audit_models import AuditLog
 from .auth import get_current_user
-from .models import User
+from .models import Device, User
 
 # 角色等级：数值越大权限越高
 ROLE_LEVELS: dict[str, int] = {
@@ -58,3 +58,11 @@ async def record_audit(
     """写入一条操作审计日志并提交。"""
     db.add(AuditLog(username=username, action=action, target=target, detail=detail))
     await db.commit()
+
+
+def _check_device_access(user: User, device: Device) -> None:
+    """检查用户是否有权访问/操作该设备。admin/superadmin 可看全部，其他只能看自己创建的设备。"""
+    if user.role in ("admin", "superadmin"):
+        return
+    if device.created_by != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "无权访问该设备")

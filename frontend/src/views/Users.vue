@@ -60,7 +60,7 @@ const form = ref({ username: '', password: '', role: 'viewer' })
 
 const roleDlg = ref(false)
 const editing = ref(null)
-const editRole = ref('viewer')
+const editForm = ref({ role: 'viewer' })
 
 async function load() {
   loading.value = true
@@ -74,8 +74,15 @@ async function load() {
   }
 }
 
-onMounted(() => {
-  if (canManage.value) load()
+
+
+onMounted(async () => {
+  if (!auth.user && auth.token) {
+    await auth.fetchMe().catch(() => {})
+  }
+  if (canManage.value) {
+    await load()
+  }
 })
 
 function openCreate() {
@@ -103,14 +110,14 @@ async function createUser() {
 
 function openRole(u) {
   editing.value = u
-  editRole.value = u.role
+  editForm.value = { role: u.role }
   roleDlg.value = true
 }
 
 async function saveRole() {
   try {
-    await http.patch(`/users/${editing.value.id}`, { role: editRole.value })
-    ElMessage.success('角色已更新')
+    await http.patch(`/users/${editing.value.id}`, editForm.value)
+    ElMessage.success('用户信息已更新')
     roleDlg.value = false
     await load()
   } catch (e) {
@@ -256,12 +263,12 @@ function isDisabled(u) {
       </template>
     </el-dialog>
 
-    <!-- 修改角色 -->
-    <el-dialog v-model="roleDlg" title="修改角色" width="380px">
+    <!-- 修改用户 -->
+    <el-dialog v-model="roleDlg" title="修改用户" width="380px">
       <el-form label-width="80px">
         <el-form-item label="用户名"><span>{{ editing?.username }}</span></el-form-item>
         <el-form-item label="角色">
-          <el-select v-model="editRole" style="width: 100%">
+          <el-select v-model="editForm.role" style="width: 100%">
             <el-option v-for="r in roleOptions.filter(o => o.value)" :key="r.value" :label="r.label" :value="r.value" />
           </el-select>
         </el-form-item>

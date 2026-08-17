@@ -15,7 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user
 from ..database import get_db
-from ..models import Device
+from ..models import Device, User
+from ..rbac import _check_device_access
 from .. import services
 
 router = APIRouter(prefix="/devices", tags=["logs"], dependencies=[Depends(get_current_user)])
@@ -24,10 +25,11 @@ router = APIRouter(prefix="/devices", tags=["logs"], dependencies=[Depends(get_c
 _MAX_LINES = 1000
 
 
-async def _get_or_404(db: AsyncSession, device_id: int) -> Device:
+async def _get_or_404(db: AsyncSession, device_id: int, user: User) -> Device:
     device = await db.get(Device, device_id)
     if device is None:
         raise HTTPException(404, "设备不存在")
+    _check_device_access(user, device)
     return device
 
 
@@ -36,7 +38,8 @@ async def device_logcat(
     device_id: int,
     lines: int = Query(200, ge=1, le=_MAX_LINES, description="拉取最近 N 行日志"),
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> dict:
-    device = await _get_or_404(db, device_id)
+    device = await _get_or_404(db, device_id, user)
     log_lines = await services.backend.list_logcat(device, lines)
     return {"device_id": device.id, "lines": log_lines}

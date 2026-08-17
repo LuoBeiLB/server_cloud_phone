@@ -121,7 +121,7 @@ const roleLabels = { superadmin: '超级管理员', admin: '管理员', operator
 .sidebar-logo-sub { font-size: 11px; color: #64748b; margin-top: 2px; }
 
 .sidebar-menu {
-  flex: 1; overflow-y: auto; border-right: none !important;
+  flex: 1;  border-right: none !important;
 }
 .sidebar-menu .el-menu-item {
   height: 42px; line-height: 42px; margin: 2px 8px;

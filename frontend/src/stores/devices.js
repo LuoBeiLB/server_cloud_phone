@@ -105,8 +105,12 @@ export const useDevices = defineStore('devices', {
     upsert(device) {
       const i = this.list.findIndex((d) => d.id === device.id)
       if (i >= 0) this.list[i] = device
-      else if (!this.creating) this.list.push(device)
     },
+    // upsert(device) {
+    //   const i = this.list.findIndex((d) => d.id === device.id)
+    //   if (i >= 0) this.list[i] = device
+    //   else if (!this.creating) this.list.push(device)
+    // },
     remove(id) {
       this.list = this.list.filter((d) => d.id !== id)
     },

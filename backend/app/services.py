@@ -50,6 +50,7 @@ async def create_device(
     *,
     name: str,
     group_id: int | None,
+    created_by: int | None = None,
     width: int,
     height: int,
     dpi: int,
@@ -62,6 +63,7 @@ async def create_device(
     device = Device(
         name=name,
         group_id=group_id,
+        created_by=created_by,
         width=width,
         height=height,
         dpi=dpi,

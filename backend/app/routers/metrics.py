@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user
 from ..database import get_db
-from ..models import Device, DeviceStatus, Group
+from ..models import Device, DeviceStatus, Group, User
 from ..ws_manager import manager
 
 router = APIRouter(prefix="/metrics", tags=["metrics"], dependencies=[Depends(get_current_user)])
@@ -37,9 +37,10 @@ def _exit_ip_of(device: Device) -> str | None:
 
 
 @router.get("/overview")
-async def overview(db: AsyncSession = Depends(get_db)) -> dict:
+async def overview(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     """看板总览：一次性返回 KPI + 状态分布 + 机型/分组分布 + 最近设备。"""
-    devices = list((await db.execute(select(Device).order_by(Device.id))).scalars().all())
+    all_devices = list((await db.execute(select(Device).order_by(Device.id))).scalars().all())
+    devices = all_devices if user.role in ("admin", "superadmin") else [d for d in all_devices if d.created_by == user.id]
     groups = list((await db.execute(select(Group).order_by(Group.id))).scalars().all())
 
     # 单次遍历完成状态计数 / 机型分布 / 分组计数 / 出口 IP 去重
@@ -83,7 +84,7 @@ async def overview(db: AsyncSession = Depends(get_db)) -> dict:
         "stopped": status_counter.get(DeviceStatus.stopped.value, 0),
         "error": status_counter.get(DeviceStatus.error.value, 0),
         "creating": status_counter.get(DeviceStatus.creating.value, 0),
-        "total_groups": len(groups),
+        "total_groups": len({d.group_id for d in devices if d.group_id}),
         "ws_clients": manager.count,
         "unique_exit_ips": len(exit_ips),
         "by_group": by_group,
@@ -93,9 +94,10 @@ async def overview(db: AsyncSession = Depends(get_db)) -> dict:
 
 
 @router.get("/devices")
-async def device_rows(db: AsyncSession = Depends(get_db)) -> list[dict]:
+async def device_rows(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict]:
     """每台设备的精简监控行。"""
-    devices = list((await db.execute(select(Device).order_by(Device.id))).scalars().all())
+    all_devices = list((await db.execute(select(Device).order_by(Device.id))).scalars().all())
+    devices = all_devices if user.role in ("admin", "superadmin") else [d for d in all_devices if d.created_by == user.id]
     return [
         {
             "id": d.id,
