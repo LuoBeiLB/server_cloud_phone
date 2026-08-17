@@ -4,8 +4,12 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api/client'
 import { useDevices, SKIN_PHASE_TEXT } from '../stores/devices'
+import { useAuth } from '../stores/auth'
 
 const store = useDevices()
+const auth = useAuth()
+
+const canCreate = computed(() => auth.user?.role !== 'viewer')
 const router = useRouter()
 
 const filter = ref({ q: '', status: '', group_id: '' })
@@ -268,7 +272,7 @@ const statusText = { running: '运行中', stopped: '已停止', creating: '创�
       <div class="page-header-right">
         <el-button @click="openSkinDlg">一键换肤</el-button>
         <el-button type="danger" :disabled="!selected.length" :loading="deleting" @click="batchRemove">批量删除</el-button>
-        <el-button type="primary" @click="createDlg = true">+ 添加设备</el-button>
+        <el-button v-if="canCreate" type="primary" @click="createDlg = true">+ 添加设备</el-button>
       </div>
     </div>
 

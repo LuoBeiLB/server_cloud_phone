@@ -6,7 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user
 from ..database import get_db
-from ..models import Device
+from ..models import Device, User
+from ..rbac import _check_device_access
 from ..schemas import DisplayCmd, InstallCmd, KeyCmd, OpenUrlCmd, SwipeCmd, TapCmd, TextCmd
 from .. import services
 
@@ -17,16 +18,17 @@ router = APIRouter(
 )
 
 
-async def _get(db: AsyncSession, device_id: int) -> Device:
+async def _get(db: AsyncSession, device_id: int, user: User) -> Device:
     device = await db.get(Device, device_id)
     if device is None:
         raise HTTPException(404, "设备不存在")
+    _check_device_access(user, device)
     return device
 
 
 @router.post("/open_url")
-async def open_url(device_id: int, cmd: OpenUrlCmd, db: AsyncSession = Depends(get_db)) -> dict:
-    device = await _get(db, device_id)
+async def open_url(device_id: int, cmd: OpenUrlCmd, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    device = await _get(db, device_id, user)
     await services.backend.open_url(device, cmd.url)
     await db.commit()
     await services.broadcast_device(device)
@@ -46,8 +48,8 @@ async def swipe(device_id: int, cmd: SwipeCmd, db: AsyncSession = Depends(get_db
 
 
 @router.post("/text")
-async def text(device_id: int, cmd: TextCmd, db: AsyncSession = Depends(get_db)) -> dict:
-    await services.backend.input_text(await _get(db, device_id), cmd.text)
+async def text(device_id: int, cmd: TextCmd, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    await services.backend.input_text(await _get(db, device_id, user), cmd.text)
     return {"ok": True}
 
 
@@ -58,8 +60,8 @@ async def key(device_id: int, cmd: KeyCmd, db: AsyncSession = Depends(get_db)) -
 
 
 @router.post("/install")
-async def install(device_id: int, cmd: InstallCmd, db: AsyncSession = Depends(get_db)) -> dict:
-    await services.backend.install(await _get(db, device_id), cmd.apk_url)
+async def install(device_id: int, cmd: InstallCmd, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    await services.backend.install(await _get(db, device_id, user), cmd.apk_url)
     return {"ok": True}
 
 

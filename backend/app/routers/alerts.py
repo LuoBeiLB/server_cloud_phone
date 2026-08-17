@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user
 from ..database import get_db
-from ..models import Device, DeviceStatus
+from ..models import Device, DeviceStatus, User
 
 router = APIRouter(prefix="/alerts", tags=["alerts"], dependencies=[Depends(get_current_user)])
 
@@ -79,9 +79,13 @@ _RULES = [
 
 
 @router.get("/current")
-async def current_alerts(db: AsyncSession = Depends(get_db)) -> dict:
+async def current_alerts(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     """按当前设备状态实时计算告警（不落库）。"""
-    devices = list((await db.execute(select(Device).order_by(Device.id))).scalars().all())
+    all_devices = list((await db.execute(select(Device).order_by(Device.id))).scalars().all())
+    if user.role in ("admin", "superadmin"):
+        devices = all_devices
+    else:
+        devices = [d for d in all_devices if d.created_by == user.id]
 
     alerts: list[dict] = []
 

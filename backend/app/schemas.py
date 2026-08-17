@@ -19,6 +19,7 @@ class UserOut(BaseModel):
     username: str
     role: str
 
+
     class Config:
         from_attributes = True
 
@@ -90,6 +91,7 @@ class DeviceOut(BaseModel):
     skin: str = ""  # 空 = 未换肤
     current_url: str | None
     fingerprint: dict
+    created_by: int | None = None
     # 最近一次拉起/启动失败的原因（含处置建议）；正常时为 null
     last_error: str | None = None
     created_at: datetime

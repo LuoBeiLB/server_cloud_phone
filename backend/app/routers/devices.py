@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import get_current_user
 from ..database import get_db
 from ..models import Device, DeviceStatus, User
+from ..rbac import _check_device_access
 from ..schemas import (
     DeviceBatchCreate,
     DeviceBatchDelete,
@@ -33,6 +34,7 @@ async def _get_or_404(db: AsyncSession, device_id: int) -> Device:
 @router.get("", response_model=DevicePage)
 async def list_devices(
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
     group_id: int | None = None,
     ungrouped: bool = Query(False, description="只看未分组设备（group_id 为空）"),
     status: DeviceStatus | None = None,
@@ -43,7 +45,10 @@ async def list_devices(
     from sqlalchemy import func, or_
 
     stmt = select(Device).order_by(Device.id)
-    if ungrouped:
+    # 数据隔离：viewer/operator 只能看到自己创建的设备；admin/superadmin 不受限
+    if user.role not in ("admin", "superadmin"):
+        stmt = stmt.where(Device.created_by == user.id)
+    elif ungrouped:
         stmt = stmt.where(Device.group_id.is_(None))
     elif group_id is not None:
         stmt = stmt.where(Device.group_id == group_id)
@@ -84,7 +89,9 @@ async def list_devices(
 
 
 @router.post("", response_model=DeviceOut)
-async def create_device(body: DeviceCreate, db: AsyncSession = Depends(get_db)) -> Device:
+async def create_device(body: DeviceCreate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Device:
+    if user.role == "viewer":
+        raise HTTPException(403, "查看员无权创建云机")
     # 生成默认名
     if not body.name:
         count = len((await db.execute(select(Device.id))).all())
@@ -93,6 +100,7 @@ async def create_device(body: DeviceCreate, db: AsyncSession = Depends(get_db)) 
         db,
         name=body.name,
         group_id=body.group_id,
+        created_by=user.id,
         width=body.width,
         height=body.height,
         dpi=body.dpi,
@@ -102,8 +110,10 @@ async def create_device(body: DeviceCreate, db: AsyncSession = Depends(get_db)) 
 
 
 @router.post("/batch", response_model=list[DeviceOut])
-async def batch_create(body: DeviceBatchCreate, db: AsyncSession = Depends(get_db)) -> list[Device]:
+async def batch_create(body: DeviceBatchCreate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> list[Device]:
     """一键创建/启动 N 台云手机。异步创建+后台并发启动。"""
+    if user.role == "viewer":
+        raise HTTPException(403, "查看员无权创建云机")
 
     base = len((await db.execute(select(Device.id))).all())
     devices: list[Device] = []
@@ -114,6 +124,7 @@ async def batch_create(body: DeviceBatchCreate, db: AsyncSession = Depends(get_d
             db,
             name=name,
             group_id=body.group_id,
+            created_by=user.id,
             width=body.width,
             height=body.height,
             dpi=body.dpi,
@@ -139,13 +150,16 @@ async def batch_create(body: DeviceBatchCreate, db: AsyncSession = Depends(get_d
 
 
 @router.get("/{device_id}", response_model=DeviceOut)
-async def get_device(device_id: int, db: AsyncSession = Depends(get_db)) -> Device:
-    return await _get_or_404(db, device_id)
+async def get_device(device_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Device:
+    device = await _get_or_404(db, device_id)
+    _check_device_access(user, device)
+    return device
 
 
 @router.patch("/{device_id}", response_model=DeviceOut)
-async def update_device(device_id: int, body: DeviceUpdate, db: AsyncSession = Depends(get_db)) -> Device:
+async def update_device(device_id: int, body: DeviceUpdate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Device:
     device = await _get_or_404(db, device_id)
+    _check_device_access(user, device)
     if body.name is not None:
         device.name = body.name
     if body.group_id is not None:
@@ -157,14 +171,15 @@ async def update_device(device_id: int, body: DeviceUpdate, db: AsyncSession = D
 
 
 @router.delete("/{device_id}")
-async def delete_device(device_id: int, db: AsyncSession = Depends(get_db)) -> dict:
+async def delete_device(device_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     device = await _get_or_404(db, device_id)
+    _check_device_access(user, device)
     await services.destroy_device(db, device)
     return {"ok": True}
 
 
 @router.post("/batch/delete")
-async def batch_delete(body: DeviceBatchDelete, db: AsyncSession = Depends(get_db)) -> dict:
+async def batch_delete(body: DeviceBatchDelete, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     """批量删除设备。
 
     切换过设备后端、或冒烟测试留下几十台废设备时，一台台点「删除」不可接受
@@ -177,6 +192,7 @@ async def batch_delete(body: DeviceBatchDelete, db: AsyncSession = Depends(get_d
         if device is None:
             failed.append({"device_id": did, "error": "设备不存在（可能已被删除）"})
             continue
+        _check_device_access(user, device)
         name = device.name
         try:
             await services.destroy_device(db, device)
@@ -187,26 +203,32 @@ async def batch_delete(body: DeviceBatchDelete, db: AsyncSession = Depends(get_d
 
 
 @router.post("/{device_id}/start", response_model=DeviceOut)
-async def start_device(device_id: int, db: AsyncSession = Depends(get_db)) -> Device:
-    return await services.start_device(db, await _get_or_404(db, device_id))
+async def start_device(device_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Device:
+    device = await _get_or_404(db, device_id)
+    _check_device_access(user, device)
+    return await services.start_device(db, device)
 
 
 @router.post("/{device_id}/stop", response_model=DeviceOut)
-async def stop_device(device_id: int, db: AsyncSession = Depends(get_db)) -> Device:
-    return await services.stop_device(db, await _get_or_404(db, device_id))
+async def stop_device(device_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Device:
+    device = await _get_or_404(db, device_id)
+    _check_device_access(user, device)
+    return await services.stop_device(db, device)
 
 
 @router.post("/{device_id}/restart", response_model=DeviceOut)
-async def restart_device(device_id: int, db: AsyncSession = Depends(get_db)) -> Device:
+async def restart_device(device_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Device:
     device = await _get_or_404(db, device_id)
+    _check_device_access(user, device)
     await services.stop_device(db, device)
     await asyncio.sleep(0.05)
     return await services.start_device(db, device)
 
 
 @router.get("/{device_id}/screenshot")
-async def screenshot(device_id: int, db: AsyncSession = Depends(get_db)) -> dict:
+async def screenshot(device_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     device = await _get_or_404(db, device_id)
+    _check_device_access(user, device)
     frame = await services.backend.screenshot(device)
     # last_action 一并返回：tap / swipe / 输入文本 这类操作在画面上看不出变化，
     # 前端把它显示在预览卡片上，用户才知道指令确实到了设备

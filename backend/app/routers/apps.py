@@ -18,7 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user
 from ..database import get_db
-from ..models import Device
+from ..models import Device, User
+from ..rbac import _check_device_access
 from .. import services
 from ..ws_manager import manager
 
@@ -44,10 +45,11 @@ class BatchAppInstall(BaseModel):
     apk_url: str
 
 
-async def _get_or_404(db: AsyncSession, device_id: int) -> Device:
+async def _get_or_404(db: AsyncSession, device_id: int, user: User) -> Device:
     device = await db.get(Device, device_id)
     if device is None:
         raise HTTPException(404, "设备不存在")
+    _check_device_access(user, device)
     return device
 
 
@@ -55,9 +57,11 @@ async def _fetch(db: AsyncSession, ids: list[int]) -> list[Device]:
     return list((await db.execute(select(Device).where(Device.id.in_(ids)))).scalars().all())
 
 
-async def _run_all(db: AsyncSession, ids: list[int], action_name: str, fn) -> dict:
+async def _run_all(db: AsyncSession, ids: list[int], action_name: str, fn, user: User) -> dict:
     """对目标设备并发执行 fn(device)，实时广播进度，汇总结果（镜像 batch.py）。"""
     devices = await _fetch(db, ids)
+    for device in devices:
+        _check_device_access(user, device)
     details: list[dict] = []
     done = 0
 
@@ -87,14 +91,14 @@ async def uninstall(device_id: int, body: AppAction, db: AsyncSession = Depends(
 
 
 @router.post("/devices/{device_id}/apps/launch")
-async def launch(device_id: int, body: AppAction, db: AsyncSession = Depends(get_db)) -> dict:
-    await services.backend.launch_app(await _get_or_404(db, device_id), body.package)
+async def launch(device_id: int, body: AppAction, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    await services.backend.launch_app(await _get_or_404(db, device_id, user), body.package)
     return {"ok": True}
 
 
 @router.post("/devices/{device_id}/apps/stop")
-async def stop(device_id: int, body: AppAction, db: AsyncSession = Depends(get_db)) -> dict:
-    await services.backend.stop_app(await _get_or_404(db, device_id), body.package)
+async def stop(device_id: int, body: AppAction, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    await services.backend.stop_app(await _get_or_404(db, device_id, user), body.package)
     return {"ok": True}
 
 
@@ -122,23 +126,23 @@ async def batch_launch(body: BatchAppAction, db: AsyncSession = Depends(get_db))
 
 
 @router.post("/apps/batch/stop")
-async def batch_stop(body: BatchAppAction, db: AsyncSession = Depends(get_db)) -> dict:
+async def batch_stop(body: BatchAppAction, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     async def fn(d: Device) -> None:
         await services.backend.stop_app(d, body.package)
 
-    return await _run_all(db, body.device_ids, "app_stop", fn)
+    return await _run_all(db, body.device_ids, "app_stop", fn, user)
 
 
 @router.post("/apps/batch/clear")
-async def batch_clear(body: BatchAppAction, db: AsyncSession = Depends(get_db)) -> dict:
+async def batch_clear(body: BatchAppAction, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     async def fn(d: Device) -> None:
         await services.backend.clear_app(d, body.package)
 
-    return await _run_all(db, body.device_ids, "app_clear", fn)
+    return await _run_all(db, body.device_ids, "app_clear", fn, user)
 
 
 @router.post("/apps/batch/install")
-async def batch_install(body: BatchAppInstall, db: AsyncSession = Depends(get_db)) -> dict:
+async def batch_install(body: BatchAppInstall, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     async def fn(d: Device) -> None:
         await services.backend.install(d, body.apk_url)
 
@@ -149,6 +153,7 @@ async def batch_install_upload(
     device_ids: str = Form(...),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> dict:
     # 1. 把前端传来的 "1,2,3" 字符串解析成 [1, 2, 3]
     ids = [int(x.strip()) for x in device_ids.split(",") if x.strip()]
@@ -167,6 +172,6 @@ async def batch_install_upload(
         async def fn(d: Device) -> None:
             await services.backend.install_from_local_file(d, tmp_path)
 
-        return await _run_all(db, ids, "app_install_upload", fn)
+        return await _run_all(db, ids, "app_install_upload", fn, user)
     finally:
         os.remove(tmp_path)  # 不管成功失败都清理临时文件

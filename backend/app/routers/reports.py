@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user
 from ..database import get_db
-from ..models import Device, DeviceStatus, Group, Script, ScriptRun
+from ..models import Device, DeviceStatus, Group, Script, ScriptRun, User
 
 router = APIRouter(prefix="/reports", tags=["reports"], dependencies=[Depends(get_current_user)])
 
@@ -64,9 +64,10 @@ _STATUS_CN = {
 
 
 @router.get("/summary")
-async def summary(db: AsyncSession = Depends(get_db)) -> dict:
+async def summary(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     """统计报表总览：一次性返回分布 + 各类数量 + 脚本运行成败统计。"""
-    devices = list((await db.execute(select(Device).order_by(Device.id))).scalars().all())
+    all_devices = list((await db.execute(select(Device).order_by(Device.id))).scalars().all())
+    devices = all_devices if user.role in ("admin", "superadmin") else [d for d in all_devices if d.created_by == user.id]
     groups = list((await db.execute(select(Group).order_by(Group.id))).scalars().all())
 
     # 数量类：分组 / 脚本 / 任务（用 count(*) 避免整表取回）
@@ -123,7 +124,7 @@ async def summary(db: AsyncSession = Depends(get_db)) -> dict:
 
     return {
         "total_devices": len(devices),
-        "total_groups": len(groups),
+        "total_groups": len({d.group_id for d in devices if d.group_id}),
         "total_scripts": script_count,
         "total_tasks": task_count,
         "unique_exit_ips": len(exit_ips),
@@ -135,9 +136,10 @@ async def summary(db: AsyncSession = Depends(get_db)) -> dict:
 
 
 @router.get("/devices.csv")
-async def devices_csv(db: AsyncSession = Depends(get_db)) -> Response:
+async def devices_csv(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Response:
     """导出全部设备明细为 CSV。带 UTF-8 BOM，避免 Excel 打开中文乱码。"""
-    devices = list((await db.execute(select(Device).order_by(Device.id))).scalars().all())
+    all_devices = list((await db.execute(select(Device).order_by(Device.id))).scalars().all())
+    devices = all_devices if user.role in ("admin", "superadmin") else [d for d in all_devices if d.created_by == user.id]
 
     buf = io.StringIO()
     writer = csv.writer(buf)

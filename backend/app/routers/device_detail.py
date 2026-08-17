@@ -15,7 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user
 from ..database import get_db
-from ..models import Device, DeviceStatus
+from ..models import Device, DeviceStatus, User
+from ..rbac import _check_device_access
 from .. import services
 
 router = APIRouter(
@@ -25,10 +26,11 @@ router = APIRouter(
 )
 
 
-async def _get_or_404(db: AsyncSession, device_id: int) -> Device:
+async def _get_or_404(db: AsyncSession, device_id: int, user: User) -> Device:
     device = await db.get(Device, device_id)
     if device is None:
         raise HTTPException(404, "设备不存在")
+    _check_device_access(user, device)
     return device
 
 
@@ -44,8 +46,8 @@ def _uptime_seconds(device: Device) -> int | None:
 
 
 @router.get("/{device_id}/detail")
-async def device_detail(device_id: int, db: AsyncSession = Depends(get_db)) -> dict:
-    device = await _get_or_404(db, device_id)
+async def device_detail(device_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    device = await _get_or_404(db, device_id, user)
     apps = await services.backend.list_apps(device)
     return {
         "id": device.id,
@@ -67,7 +69,7 @@ async def device_detail(device_id: int, db: AsyncSession = Depends(get_db)) -> d
 
 
 @router.get("/{device_id}/apps")
-async def device_apps(device_id: int, db: AsyncSession = Depends(get_db)) -> dict:
-    device = await _get_or_404(db, device_id)
+async def device_apps(device_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    device = await _get_or_404(db, device_id, user)
     apps = await services.backend.list_apps(device)
     return {"device_id": device.id, "count": len(apps), "apps": apps}

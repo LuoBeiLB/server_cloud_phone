@@ -24,7 +24,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user
 from ..database import get_db
-from ..models import Device, Script, ScriptRun
+from ..models import Device, Script, ScriptRun, User
+from ..rbac import _check_device_access
 from ..schemas import ScriptCreate, ScriptOut, ScriptRunOut, ScriptRunRequest
 from ..script_templates import TEMPLATES
 from .. import services
@@ -242,13 +243,15 @@ async def _exec_step(device: Device, step: dict, depth: int = 0) -> dict | None:
 
 
 @router.post("/{script_id}/run", response_model=ScriptRunOut)
-async def run_script(script_id: int, body: ScriptRunRequest, db: AsyncSession = Depends(get_db)) -> ScriptRun:
+async def run_script(script_id: int, body: ScriptRunRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> ScriptRun:
     script = await db.get(Script, script_id)
     if script is None:
         raise HTTPException(404, "脚本不存在")
     devices = list(
         (await db.execute(select(Device).where(Device.id.in_(body.device_ids)))).scalars().all()
     )
+    for device in devices:
+        _check_device_access(user, device)
 
     async def _run_on(device: Device) -> dict:
         step_results = []
