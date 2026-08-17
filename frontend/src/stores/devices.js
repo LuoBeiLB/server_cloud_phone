@@ -39,10 +39,20 @@ export const useDevices = defineStore('devices', {
     wsState: 'connecting', // connecting | open | closed —— 供界面显示实时通道状态
     wsStateDetail: '', // 断开时的补充说明（重连次数等）
     wsClosedAt: 0, // 断开时刻，用于提示「画面可能不是最新」
+    // ---- 跨页面共享的「已选设备」集合 ----
+    // Devices.vue 的「全选所有页」把所有 device id 灌到这里，Batch.vue 直接读 store 就能拿到 N 台从机。
+    // 用数组不用 Set：Pinia 对 Set 的响应式处理容易踩坑；id 数量 < 千级，数组去重完全够用。
+    allSelectedIds: [],
   }),
   getters: {
     running: (s) => s.list.filter((d) => d.status === 'running'),
     byId: (s) => (id) => s.list.find((d) => d.id === id),
+    allSelectedCount: (s) => s.allSelectedIds.length,
+    // 把 id 解析成 device 对象（list 里能找到的优先；找不到就只返 id，便于 Batch.vue 占位）
+    allSelectedDevices: (s) => {
+      const map = new Map(s.list.map((d) => [d.id, d]))
+      return s.allSelectedIds.map((id) => map.get(id) || { id, name: `设备 #${id}`, _missing: true })
+    },
   },
   actions: {
     // refresh 被十几处调用（页面进入、操作成功后、WS 事件后）。
@@ -75,6 +85,22 @@ export const useDevices = defineStore('devices', {
       } catch {
         return false // 分组是辅助信息，失败不阻塞主流程；提示由拦截器统一给出
       }
+    },
+    // ---- 跨页面共享的「已选设备」操作 ----
+    setAllSelectedIds(ids) {
+      this.allSelectedIds = [...new Set((ids || []).map(Number).filter(Boolean))]
+    },
+    addAllSelectedId(id) {
+      const n = Number(id)
+      if (!n || this.allSelectedIds.includes(n)) return
+      this.allSelectedIds.push(n)
+    },
+    removeAllSelectedId(id) {
+      const n = Number(id)
+      this.allSelectedIds = this.allSelectedIds.filter((x) => x !== n)
+    },
+    clearAllSelectedIds() {
+      this.allSelectedIds = []
     },
     upsert(device) {
       const i = this.list.findIndex((d) => d.id === device.id)
