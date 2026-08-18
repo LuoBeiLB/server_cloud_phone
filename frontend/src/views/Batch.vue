@@ -37,6 +37,10 @@ const lastAction = ref('')
 
 const allDevices = computed(() => store.list)
 const totalCount = computed(() => allDevices.value.length)
+// 服务端设备总数（分页接口返回；页面只加载前 100 台时它才是真实总数）
+const totalDeviceCount = computed(() => store.total || totalCount.value)
+// 是否已全选：从机数 ≥ 总数-主控1台
+const isAllSlaves = computed(() => slaveCount.value > 0 && slaveCount.value >= totalDeviceCount.value - 1)
 // 从机池 = store.allSelectedIds 中排除主控的那台
 const slaveIds = computed(() => store.allSelectedIds.filter((id) => id !== masterId.value))
 const slaveCount = computed(() => slaveIds.value.length)
@@ -84,15 +88,35 @@ function toggleSlave(id) {
   }
 }
 
-function selectAllSlaves() {
-  if (!allDevices.value.length) return
-  const ids = allDevices.value.map((d) => d.id)
-  store.setAllSelectedIds(ids)
-  // 主控自动加进从机池，避免"全选"后主控被排除
-  if (masterId.value && !ids.includes(masterId.value)) {
-    store.addAllSelectedId(masterId.value)
+// 全选所有从机：按服务端总数分页拉全部 id（页面列表只加载前 100 台，不能只选已加载的）
+const selectingAll = ref(false)
+async function selectAllSlaves() {
+  if (!totalDeviceCount.value) return
+  selectingAll.value = true
+  try {
+    const ids = []
+    const pageSize = 100
+    let p = 1
+    while (ids.length < totalDeviceCount.value) {
+      const { data } = await api.listDevices({ page: p, page_size: pageSize })
+      const items = Array.isArray(data) ? data : data.items || []
+      if (items.length === 0) break
+      ids.push(...items.map((d) => d.id))
+      if (items.length < pageSize) break
+      p += 1
+      if (p > 50) break // 保险：最多 5000 台，防后端 total 不准导致死循环
+    }
+    store.setAllSelectedIds(ids)
+    // 主控自动加进从机池，避免"全选"后主控被排除
+    if (masterId.value && !ids.includes(masterId.value)) {
+      store.addAllSelectedId(masterId.value)
+    }
+    ElMessage.success(`已加入 ${slaveIds.value.length} 台从机`)
+  } catch (e) {
+    ElMessage.error(e?.friendly || '全选失败')
+  } finally {
+    selectingAll.value = false
   }
-  ElMessage.success(`已加入 ${slaveIds.value.length} 台从机`)
 }
 
 function clearAllSlaves() {
@@ -498,7 +522,7 @@ onBeforeUnmount(() => {
       <div class="page-title">批量操控台</div>
       <div class="page-header-right">
         <el-tag type="info" effect="dark">
-          共 {{ totalCount }} 台
+          共 {{ totalDeviceCount }} 台
         </el-tag>
         <span class="master-picker">
           <span class="picker-label">主控设备</span>
@@ -508,7 +532,7 @@ onBeforeUnmount(() => {
             placeholder="选一台作主控"
             size="default"
             style="width: 220px"
-            :disabled="!totalCount"
+            :disabled="!totalDeviceCount"
           >
             <el-option
               v-for="d in allDevices"
@@ -521,11 +545,13 @@ onBeforeUnmount(() => {
         <el-tag :type="slaveCount ? 'success' : 'info'" effect="dark">
           从机 {{ slaveCount }} 台
         </el-tag>
-        <el-button size="small" :disabled="!totalCount" @click="selectAllSlaves">
-          全选（{{ totalCount - 1 }}）
-        </el-button>
-        <el-button size="small" type="warning" plain :disabled="!slaveCount" @click="clearAllSlaves">
-          清空从机
+        <el-button size="small"
+          :type="isAllSlaves ? 'warning' : 'primary'"
+          :plain="!!isAllSlaves"
+          :disabled="!totalDeviceCount"
+          :loading="selectingAll"
+          @click="isAllSlaves ? clearAllSlaves() : selectAllSlaves()">
+          {{ isAllSlaves ? '清空从机' : `全选（${totalDeviceCount - 1}）` }}
         </el-button>
       </div>
     </div>
