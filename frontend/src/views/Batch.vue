@@ -123,6 +123,47 @@ async function loadAllDeviceSnapshots() {
   }
 }
 
+// ---------------- 主控投屏（ws-scrcpy H.264 直连，可直接操控） ----------------
+// 与 Control.vue 内嵌投屏同一条链路：/api/health → ws_scrcpy_base + adb_port 拼 URL。
+// 未部署 / 主控无 adb 端口时按钮禁用，退回截图模式。
+const wsScrcpyBase = ref('')
+const scrcpyDisabled = computed(() => !wsScrcpyBase.value || !masterDevice.value?.adb_port)
+const scrcpyUrl = computed(() => {
+  if (scrcpyDisabled.value) return ''
+  const udid = `localhost:${masterDevice.value.adb_port}`
+  const base = wsScrcpyBase.value.replace(/\/+$/, '')
+  const wsProto = base.startsWith('https') ? 'wss' : 'ws'
+  const innerWs =
+    `${wsProto}://${base.replace(/^https?:\/\//, '')}` +
+    `/?action=proxy-adb&remote=tcp:8886&udid=${encodeURIComponent(udid)}`
+  return (
+    `${base}/#!action=stream&udid=${encodeURIComponent(udid)}` +
+    `&player=broadway&ws=${encodeURIComponent(innerWs)}`
+  )
+})
+
+// 主控画板默认本地截图模式（2s 轮询，稳定可控）；投屏为手动切换：
+// ws-scrcpy 服务可用时点「投屏模式」进 H.264 直连 iframe，再点「退出投屏」回来。
+// 注意：投屏中的点按/滑动由 ws-scrcpy 直连主控（不经后端），同时经 follow 补丁
+// postMessage 广播到从机池（需 ws-scrcpy dist 打了 follow 补丁；未打时仅主控动）。
+// 虚拟按键和三张 side-card 的批量操作不受影响（仍广播主控+从机全池）。
+const embedStream = ref(false)
+function toggleEmbed() {
+  if (scrcpyDisabled.value) {
+    return ElMessage.warning(
+      !wsScrcpyBase.value
+        ? '未部署 ws-scrcpy 投屏服务（后端设 CLOUD_WS_SCRCPY_BASE=http://<地址>:8100 启用）'
+        : '主控设备无 adb 端口，不支持投屏',
+    )
+  }
+  embedStream.value = !embedStream.value
+  if (embedStream.value) {
+    stopMasterPolling()
+  } else {
+    startMasterPolling()
+  }
+}
+
 // ---------------- 主控轮询：2s/帧强制 HTTP（保证点击实时反馈） ----------------
 let masterTimer = null
 let masterBusy = false
@@ -166,7 +207,7 @@ let slaveBusy = false
 
 async function pollSlaves() {
   if (slaveBusy) return
-  const ids = slaveIds.value
+  const ids = broadcastTargets()
   if (!ids.length) {
     slaveFrames.value = {}
     return
@@ -217,7 +258,11 @@ watch(masterId, () => {
   }
   slaveFrames.value = {}
   startSlavePolling()
-  startMasterPolling()
+  if (embedStream.value) {
+    stopMasterPolling() // 投屏中：iframe src 已跟随主控切换，不拉截图
+  } else {
+    startMasterPolling()
+  }
 })
 
 watch(
@@ -242,9 +287,15 @@ function toRefFromDevice(x, y) {
   }
 }
 
+// 广播目标 = 主控 + 从机池：主控画板上的操作主控自己也要执行，
+// 否则盯着主控画面操作看起来「没反应」（v7 只发从机的坑）。
+function broadcastTargets() {
+  return [masterId.value, ...slaveIds.value].filter(Boolean)
+}
+
 const broadcasting = ref(false)
 async function broadcastTap(x, y) {
-  const ids = slaveIds.value
+  const ids = broadcastTargets()
   if (!ids.length) return ElMessage.warning('请先勾选从机（底部多画面预览里勾选，或点顶部「全选」）')
   if (!masterId.value) return ElMessage.warning('请先选主控')
   broadcasting.value = true
@@ -260,7 +311,7 @@ async function broadcastTap(x, y) {
 }
 
 async function broadcastSwipe(x1, y1, x2, y2, durationMs = 300) {
-  const ids = slaveIds.value
+  const ids = broadcastTargets()
   if (!ids.length) return ElMessage.warning('请先勾选从机（底部多画面预览里勾选，或点顶部「全选」）')
   if (!masterId.value) return ElMessage.warning('请先选主控')
   broadcasting.value = true
@@ -277,6 +328,42 @@ async function broadcastSwipe(x1, y1, x2, y2, durationMs = 300) {
 
 // PhoneFrame @tap / @swipe 事件 → 归一到 1080×1920 → 批量下发
 // 跟 SingleView 一样的阈值：< 4% 短边算 tap，否则算 swipe（80~1500ms）
+// ---------------- 投屏跟随：iframe 内点按/滑动 → 广播从机池 ----------------
+// 依赖 ws-scrcpy dist 的 follow 事件补丁（setup-ws-scrcpy.sh v3 注入 index.html）：
+// iframe 旁听 pointer 事件，postMessage({type:'cp-scrcpy-follow', kind:'tap'|'swipe',
+// 坐标为相对画面的 0~1 归一值})。主控已由 ws-scrcpy 直连执行，这里只发从机避免重复；
+// 归一值直接乘 REF 基准（与 toRefFromDevice 线性等价）。
+let followBusy = false
+function onFollowMessage(e) {
+  const d = e?.data
+  if (!d || d.type !== 'cp-scrcpy-follow' || !embedStream.value) return
+  const ids = [...slaveIds.value]
+  if (!ids.length || followBusy) return
+  followBusy = true
+  ;(async () => {
+    try {
+      let data
+      if (d.kind === 'swipe') {
+        const x1 = Math.round((d.x1 || 0) * REF_W)
+        const y1 = Math.round((d.y1 || 0) * REF_H)
+        const x2 = Math.round((d.x2 || 0) * REF_W)
+        const y2 = Math.round((d.y2 || 0) * REF_H)
+        ;({ data } = await api.batchSwipe(ids, x1, y1, x2, y2, d.dur || 300))
+        lastAction.value = `投屏滑动 (${x1},${y1})→(${x2},${y2}) · 从机 ${data?.ok ?? 0}/${data?.total ?? ids.length}`
+      } else {
+        const x = Math.round((d.x || 0) * REF_W)
+        const y = Math.round((d.y || 0) * REF_H)
+        ;({ data } = await api.batchTap(ids, x, y))
+        lastAction.value = `投屏点击 (${x},${y}) · 从机 ${data?.ok ?? 0}/${data?.total ?? ids.length}`
+      }
+    } catch (err) {
+      ElMessage.error(err?.friendly || '投屏跟随下发失败')
+    } finally {
+      followBusy = false
+    }
+  })()
+}
+
 function onMasterTap(pt) {
   if (!masterId.value) return
   const { x, y } = toRefFromDevice(pt.x, pt.y)
@@ -300,7 +387,7 @@ const KEY_MAP = [
 ]
 
 async function broadcastKey(k) {
-  const ids = slaveIds.value
+  const ids = broadcastTargets()
   if (!ids.length) return ElMessage.warning('请先勾选从机（底部多画面预览里勾选，或点顶部「全选」）')
   if (!masterId.value) return ElMessage.warning('请先选主控')
   broadcasting.value = true
@@ -335,7 +422,7 @@ function needSlaves() {
 async function runBatchOpenUrl() {
   if (!needSlaves()) return
   if (!batchUrl.value) return ElMessage.warning('请输入 URL')
-  const ids = slaveIds.value
+  const ids = broadcastTargets()
   try {
     const { data } = await api.batchOpenUrl(ids, batchUrl.value)
     ElMessage.success(`批量开网页：成功 ${data?.ok ?? 0}/${data?.total ?? ids.length}`)
@@ -347,7 +434,7 @@ async function runBatchOpenUrl() {
 async function runBatchText() {
   if (!needSlaves()) return
   if (!batchText.value) return ElMessage.warning('请输入文本')
-  const ids = slaveIds.value
+  const ids = broadcastTargets()
   try {
     const { data } = await api.batchText(ids, batchText.value)
     ElMessage.success(`批量输入：成功 ${data?.ok ?? 0}/${data?.total ?? ids.length}`)
@@ -359,7 +446,7 @@ async function runBatchText() {
 async function runBatchInstall() {
   if (!needSlaves()) return
   if (!batchApk.value) return ElMessage.warning('请输入 APK URL')
-  const ids = slaveIds.value
+  const ids = broadcastTargets()
   try {
     await ElMessageBox.confirm(
       `确定要向 ${ids.length} 台从机安装 APK？\n${batchApk.value}`,
@@ -379,8 +466,16 @@ async function runBatchInstall() {
 
 // ---------------- 生命周期 ----------------
 onMounted(async () => {
+  window.addEventListener('message', onFollowMessage)
   await store.refresh({ page_size: 100 })
   loadAllDeviceSnapshots()
+  // ws-scrcpy 投屏服务探针（与 Control.vue 同链路：失败只是不显示投屏入口）
+  try {
+    const { data } = await api.health()
+    wsScrcpyBase.value = data.ws_scrcpy_base || ''
+  } catch {
+    /* 探针失败不影响截图模式 */
+  }
   // 默认主控 = store.list 第 1 台，从机池 = 空（强制用户先选主控再勾从机）
   if (!masterId.value && allDevices.value.length) {
     masterId.value = allDevices.value[0].id
@@ -390,6 +485,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('message', onFollowMessage)
   stopMasterPolling()
   stopSlavePolling()
 })
@@ -460,14 +556,35 @@ onBeforeUnmount(() => {
           >
             {{ k.label }}
           </el-button>
+          <el-button
+            size="small"
+            :type="embedStream ? 'danger' : 'success'"
+            plain
+            :disabled="scrcpyDisabled && !embedStream"
+            @click="toggleEmbed"
+          >
+            {{ embedStream ? '退出投屏' : '投屏模式' }}
+          </el-button>
         </div>
 
         <div class="phone-panel">
           <div class="phone-card">
             <div v-if="!masterId" class="canvas-empty">请先在顶部「主控设备」下拉选一台</div>
             <template v-else>
+              <div
+                v-if="embedStream"
+                class="embed-frame"
+                :style="{ aspectRatio: `${masterDevice?.width || 9} / ${masterDevice?.height || 16}` }"
+              >
+                <iframe
+                  v-if="scrcpyUrl"
+                  :src="scrcpyUrl"
+                  class="embed-iframe"
+                  allowfullscreen
+                />
+              </div>
               <PhoneFrame
-                v-if="masterDevice"
+                v-else-if="masterDevice"
                 :device="masterDevice"
                 :frame="masterFrame"
                 :last-action="lastAction"
@@ -481,7 +598,9 @@ onBeforeUnmount(() => {
           </div>
           <div class="phone-hint">
             <el-icon><InfoFilled /></el-icon>
-            点击画板 = 点按；按住拖动 = 滑动（实时映射设备坐标）
+            {{ embedStream
+              ? '投屏直连：点按/滑动直接操控主控并自动同步从机（需 ws-scrcpy 已打 follow 补丁）；虚拟按键广播主控+从机'
+              : '本地截图模式（2s 刷新）；点击画板 = 点按，按住拖动 = 滑动（同步主控+从机）' }}
           </div>
           <div v-if="broadcasting" class="broadcasting-overlay-inline">
             <span>同步中…</span>
@@ -683,6 +802,20 @@ onBeforeUnmount(() => {
   width: 100%;
   margin: 0;
   max-width: 320px;
+}
+/* 主控投屏容器：按主控真实分辨率定长宽比，iframe 铺满（ws-scrcpy 侧已打 CSS 补丁隐藏工具栏） */
+.embed-frame {
+  width: 100%;
+  max-width: 320px;
+  background: #000;
+  border-radius: 22px;
+  overflow: hidden;
+}
+.embed-iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
 }
 .phone-hint {
   text-align: center;

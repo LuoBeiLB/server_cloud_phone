@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref, computed, watch } from 'vue'
+import { onMounted, ref, computed, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api/client'
@@ -223,6 +223,37 @@ function onSelectionChange(rows) {
   syncSelectionToStore()
 }
 
+// 翻页/筛选/刷新后：把 store 里已选的当前页行同步为 el-table 勾选高亮。
+// 「全选所有页」时其他页的行从未在 el-table 里被勾过（数据都没加载过），
+// reserve-selection 只记住「手动勾过」的行，不会自动恢复它们 —— 所以必须
+// 在每次列表数据变化后，主动把当前页里属于已选集合的行补勾上。
+//
+// ⚠️ 时序坑（第一版就栽在这）：逐行 toggleRowSelection 每勾一行就触发一次
+// selection-change → syncSelectionToStore 把「当前页还没补勾到的行」从
+// store 踢掉，后续循环判断 includes() 为 false 就跳过 → 一页只勾上前几台。
+// 修法：用补勾前的快照 before 判断该勾谁（不受中间态污染），补勾完等
+// selection-change 全部传播完，再按「当前页 UI 勾选 ∪ 非当前页快照」
+// 修正回 store —— 最终态正确，中间态怎么抖都不影响。
+watch(
+  () => store.list,
+  async () => {
+    await nextTick()
+    if (!tableRef.value) return
+    const before = new Set(store.allSelectedIds) // 快照：以补勾前为准
+    for (const d of store.list) {
+      if (before.has(d.id)) tableRef.value.toggleRowSelection(d, true)
+    }
+    await nextTick() // 等逐行 toggle 触发的 selection-change 传播完
+    const currentPageIds = new Set(store.list.map((d) => d.id))
+    const merged = new Set()
+    for (const d of selected.value) merged.add(d.id) // 当前页 UI 勾选
+    for (const id of before) {
+      if (!currentPageIds.has(id)) merged.add(id) // 非当前页的按快照保留
+    }
+    store.setAllSelectedIds([...merged])
+  },
+)
+
 // 「全选所有页」：按 store.total 拉所有 id（全部分页+全部分组，绕过当前筛选）
 // 简化版：直接用 store.total（API 已返回）。若有筛选条件，则用「全选所有页」+ 当前筛选
 const selectingAll = ref(false)
@@ -387,15 +418,18 @@ const statusText = { running: '运行中', stopped: '已停止', creating: '创�
       </el-select>
       <el-button size="small" link @click="newGroup">+ 新建分组</el-button>
       <div class="spacer"></div>
-      <!-- 已选统计 + 全选所有页 + 清空选择 -->
+      <!-- 已选统计 + 全选所有页/取消全选（清空已集成进同一按钮，二态切换） -->
       <el-tag :type="store.allSelectedCount ? 'success' : 'info'" effect="dark" class="selection-tag">
         已选 {{ store.allSelectedCount }} 台 / 共 {{ store.total }} 台
       </el-tag>
-      <el-button size="small" type="primary" plain :loading="selectingAll" @click="selectAllPages">
-        全选所有页
-      </el-button>
-      <el-button size="small" :disabled="!store.allSelectedCount" link @click="clearAllSelection">
-        清空选择
+      <el-button
+        size="small"
+        :type="store.allSelectedCount ? 'danger' : 'primary'"
+        plain
+        :loading="selectingAll"
+        @click="store.allSelectedCount ? clearAllSelection() : selectAllPages()"
+      >
+        {{ store.allSelectedCount ? '取消全选' : '全选所有页' }}
       </el-button>
     </div>
 
