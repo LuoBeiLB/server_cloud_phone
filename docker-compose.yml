@@ -93,7 +93,7 @@ services:
       CLOUD_REDROID_GPU_MODE: guest
       # 代理池（一机一码独立出口 IP），JSON 数组，如：
       # CLOUD_PROXY_POOL: '["socks5://1.2.3.4:1080","http://5.6.7.8:8080"]'
-      CLOUD_WS_SCRCPY_BASE: http://192.168.9.113:8100
+      CLOUD_WS_SCRCPY_BASE: http://192.168.9.114:8100
     ports:
       - "8000:8000"
     healthcheck:
